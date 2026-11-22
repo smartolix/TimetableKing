@@ -38,6 +38,17 @@ Stundenplanprogramm für Schulen: Stammdaten erfassen, Stundenplan automatisch b
 - **PDF:** Wochenpläne pro Klasse, Lehrkraft oder Raum
 - **Beispielschule** (Mittelschule, 8 Klassen, 17 Lehrkräfte, Religion als Kopplung, Technik in Gruppen, Teamteaching in Mathe) zum Ausprobieren
 
+## Online ausprobieren (ohne Installation)
+
+[![In GitHub Codespaces öffnen](https://github.com/codespaces/badge.svg)](https://codespaces.new/smartolix/TimetableKing?ref=neuaufbau-python-react)
+
+1. Auf den Knopf klicken (GitHub-Anmeldung nötig) und „Create codespace“ wählen.
+2. Beim ersten Mal 3–5 Minuten warten, bis alles installiert ist. Danach öffnet sich TimetableKing in einem neuen Browser-Tab, mit geladener Beispielschule.
+   Falls kein Tab aufgeht: unten im Reiter „Ports“ bei Port 5173 auf das Globus-Symbol klicken.
+3. Zum Beenden den Codespace unter <https://github.com/codespaces> anhalten oder löschen. Private GitHub-Konten haben ein monatliches Gratiskontingent.
+
+Der Codespace ist privat: Nur du siehst ihn, solange du den Port nicht öffentlich schaltest.
+
 ## Schnellstart mit Docker
 
 ```bash

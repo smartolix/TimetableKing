@@ -1,0 +1,25 @@
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/python:3.13
+    volumes:
+      - ../..:/workspaces:cached
+    command: sleep infinity
+    environment:
+      TTK_DATABASE_URL: postgresql+psycopg://timetable:timetable@db:5432/timetableking
+      # Der Vite-Server leitet /api an das Backend weiter
+      VITE_API_URL: http://localhost:8000
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: timetable
+      POSTGRES_PASSWORD: timetable
+      POSTGRES_DB: timetableking
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
