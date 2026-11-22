@@ -162,3 +162,33 @@ def test_demo_school_solves(client):
     )
     assert tt["status"] == "done", tt["message"]
     assert client.get(f"/api/timetables/{tt['id']}/conflicts").json() == []
+
+
+def test_constraint_api(client):
+    data = setup_small(client)
+    cat = client.get("/api/constraints/catalog").json()
+    assert "Lehrkräfte" in cat["categories"] and len(cat["types"]) >= 20
+    bad = client.post("/api/constraints", json={"type": "teacher_max_per_day", "params": {"max": 0}})
+    assert bad.status_code == 422
+    res = client.post(
+        "/api/constraints",
+        json={
+            "type": "teacher_max_per_day",
+            "importance": "must",
+            "params": {"teacher_ids": [data["t1"]["id"]], "max": 2},
+        },
+    )
+    assert res.status_code == 201, res.text
+    cid = res.json()["id"]
+    assert client.patch(f"/api/constraints/{cid}/active", json={"active": False}).json()["active"] is False
+    client.patch(f"/api/constraints/{cid}/active", json={"active": True})
+    tt = wait_for(client, client.post("/api/timetables", json={"name": "B", "time_limit": 10}).json()["id"])
+    assert tt["status"] == "done", tt["message"]
+    assert {"constraint_id": cid, "violations": 0} in tt["report"]
+    hub = {data["lessons"][0]["id"], data["lessons"][2]["id"]}
+    per_day = {}
+    for p in tt["placements"]:
+        if p["lesson_id"] in hub:
+            per_day[p["day"]] = per_day.get(p["day"], 0) + p["length"]
+    assert max(per_day.values()) <= 2
+    assert client.delete(f"/api/constraints/{cid}").status_code == 204

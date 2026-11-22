@@ -36,7 +36,32 @@ export interface TimetableSummary {
   updated_at: string
 }
 export interface Placement { id: number; lesson_id: number; day: number; period: number; length: number; room_id: number | null; locked: boolean }
-export interface Timetable extends TimetableSummary { placements: Placement[] }
+export interface ReportEntry { constraint_id: number; violations: number }
+export interface Timetable extends TimetableSummary { placements: Placement[]; report: ReportEntry[] }
+
+export type ParamKind = 'int' | 'period' | 'days' | 'slots' | 'bool' | 'teachers' | 'classes' | 'subjects' | 'rooms' | 'subject'
+export interface ConstraintParam {
+  name: string
+  kind: ParamKind
+  label: string
+  default: unknown
+  min: number | null
+  max: number | null
+  hint: string
+  required: boolean
+}
+export interface ConstraintType { key: string; category: string; title: string; description: string; params: ConstraintParam[] }
+export type Importance = 'off' | 'low' | 'normal' | 'high' | 'must'
+export interface Catalog { categories: string[]; importance: Record<Importance, string>; types: ConstraintType[] }
+export interface Constraint {
+  id: number
+  type: string
+  importance: Importance
+  active: boolean
+  params: Record<string, unknown>
+  note: string
+  position: number
+}
 export interface Conflict { kind: string; message: string; placement_ids: number[]; day: number; period: number }
 
 export class ApiError extends Error {

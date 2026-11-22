@@ -1,5 +1,6 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useSettings } from './data'
+import Constraints from './pages/Constraints'
 import ImportExport from './pages/ImportExport'
 import Lessons from './pages/Lessons'
 import { ClassesPage, RoomsPage, SubjectsPage, TeachersPage } from './pages/MasterData'
@@ -10,6 +11,7 @@ import Timetables from './pages/Timetables'
 const NAV = [
   { to: '/plaene', label: 'Pläne' },
   { to: '/unterricht', label: 'Unterricht' },
+  { to: '/bedingungen', label: 'Bedingungen' },
   { to: '/klassen', label: 'Klassen' },
   { to: '/lehrkraefte', label: 'Lehrkräfte' },
   { to: '/faecher', label: 'Fächer' },
@@ -44,6 +46,7 @@ export default function App() {
           <Route path="/plaene" element={<Timetables />} />
           <Route path="/plaene/:id" element={<TimetableView />} />
           <Route path="/unterricht" element={<Lessons />} />
+          <Route path="/bedingungen" element={<Constraints />} />
           <Route path="/klassen" element={<ClassesPage />} />
           <Route path="/lehrkraefte" element={<TeachersPage />} />
           <Route path="/faecher" element={<SubjectsPage />} />

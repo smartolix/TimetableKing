@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, type TimetableSummary } from '../api'
-import { ErrorBox, Field, Modal } from '../components/ui'
+import { ErrorBox, Field, Modal, RelaxOption } from '../components/ui'
 import { useMasterData } from '../data'
 import { STATUS_LABEL } from '../format'
 
@@ -18,8 +18,9 @@ export default function Timetables() {
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const [seconds, setSeconds] = useState(30)
+  const [relax, setRelax] = useState(false)
   const create = useMutation({
-    mutationFn: () => api.post<TimetableSummary>('/timetables', { name, time_limit: seconds }),
+    mutationFn: () => api.post<TimetableSummary>('/timetables', { name, time_limit: seconds, relax }),
     onSuccess: (tt) => { qc.invalidateQueries({ queryKey: ['timetables'] }); setCreating(false); nav(`/plaene/${tt.id}`) },
   })
   const remove = useMutation({
@@ -76,6 +77,7 @@ export default function Timetables() {
             <Field label="Rechenzeit (Sekunden)" hint="Mehr Zeit ergibt meist weniger Hohlstunden.">
               <input type="number" min={5} max={3600} value={seconds} onChange={(e) => setSeconds(Number(e.target.value))} />
             </Field>
+            <RelaxOption value={relax} onChange={setRelax} />
             <ErrorBox error={create.error} />
             <div className="form-actions">
               <button type="button" onClick={() => setCreating(false)}>Abbrechen</button>

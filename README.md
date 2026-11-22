@@ -16,6 +16,13 @@ Stundenplanprogramm für Schulen: Stammdaten erfassen, Stundenplan automatisch b
   - harte Regeln: keine Doppelbelegung von Lehrkraft, Klasse oder Raum, Sperrzeiten, Höchststunden pro Tag, Doppelstunden nicht über Pausen, Stunden eines Unterrichts auf verschiedene Tage verteilt, fixierte Stunden bleiben
   - weiche Regeln (gewichtet): Hohlstunden für Klassen und Lehrkräfte, späte Stunden
   - Vorprüfung mit verständlichen Fehlermeldungen (z. B. „Lehrkraft HUB: 30 Stunden, aber nur 24 mögliche Stunden“)
+- **Bedingungen** (Menü „Bedingungen“): 26 Bedingungsarten aus einem Katalog auswählen und einstellen, jeweils mit Geltungsbereich (alle oder ausgewählte Lehrkräfte/Klassen/Fächer/Räume), Wichtigkeit (Aus/Niedrig/Normal/Hoch/Muss), Aktiv-Schalter und Notiz
+  - Lehrkräfte: Höchst-/Mindeststunden pro Tag, Stunden in Folge, Hohlstunden pro Tag/Woche, Arbeitstage, freier Tag aus Auswahl, Mittagspause, markierte Zeiten, spätester Beginn
+  - Klassen: Höchst-/Mindeststunden, Hohlstunden, Beginn in der 1. Stunde, Mittagspause, markierte Zeiten
+  - Fächer: N-mal pro Tag, nicht an Folgetagen, verbotene Zeiten (auch nur Doppelstunden), markierte Zeiten, Randstunde, Fächerpaare (nicht/am selben Tag, nicht direkt hintereinander, nicht am Folgetag)
+  - Räume: an höchstens N Tagen genutzt
+  - nach der Berechnung zeigt ein Bericht, welche Bedingungen wie oft verletzt wurden; „Bedingungen lockern“ erlaubt einen Plan auch dann, wenn „Muss“-Bedingungen nicht alle erfüllbar sind
+  - neue Bedingungsarten: Eintrag in `backend/app/constraint_catalog.py` und Umsetzung in `backend/app/solver/constraints.py`
 - **Planansicht** nach Klasse, Lehrkraft oder Raum
   - Drag & Drop; beim Ziehen werden freie Felder grün und Felder mit Konflikt rot markiert
   - Blöcke gleicher Länge tauschen, Raum ändern, Stunden fixieren
@@ -89,7 +96,9 @@ backend/
   app/
     models.py           Datenmodell
     schemas.py          API-Schemas (Pydantic)
+    constraint_catalog.py  Katalog der Bedingungsarten (Parameter, Texte)
     solver/cpsat.py     Solver (unabhängig von der Datenbank)
+    solver/constraints.py  Umsetzung der Bedingungsarten
     services/
       problem.py        Stammdaten -> Solver-Problem
       runner.py         Berechnung im Hintergrund
@@ -112,6 +121,7 @@ frontend/
 - Benutzerkonten und Rollen (Admin, Lehrkraft, Schüler/Eltern) mit Nur-Lese-Ansicht
 - Vertretungsplanung (Abwesenheiten, Vertretungsvorschläge)
 - Klassenteilungen und Gruppen (z. B. Religion, Werken in Gruppen)
-- weitere weiche Regeln: Unterrichtsbeginn in der 1. Stunde, Mittagspause, Wunschzeiten, Fächer nicht direkt hintereinander
+- weitere Bedingungsarten aus `docs/bedingungen-katalog.md` (z. B. gleichzeitiger Unterricht, gleiche Stunde jeden Tag, Raumkapazität, Gebäude), Zeitwünsche mit Stufen
+- Import aus aSc Stundenplan (`.roz`)
 - Mehrere Schulen bzw. Schuljahre
 - Fortschrittsanzeige während der Berechnung, Abbrechen einer Berechnung

@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type Lesson, type Room, type SchoolClass, type Settings, type Subject, type Teacher } from './api'
+import { api, type Catalog, type Constraint, type Lesson, type Room, type SchoolClass, type Settings, type Subject, type Teacher } from './api'
 
 export const useSettings = () => useQuery({ queryKey: ['settings'], queryFn: () => api.get<Settings>('/settings') })
 export const useSubjects = () => useQuery({ queryKey: ['subjects'], queryFn: () => api.get<Subject[]>('/subjects') })
 export const useTeachers = () => useQuery({ queryKey: ['teachers'], queryFn: () => api.get<Teacher[]>('/teachers') })
 export const useRooms = () => useQuery({ queryKey: ['rooms'], queryFn: () => api.get<Room[]>('/rooms') })
 export const useClasses = () => useQuery({ queryKey: ['classes'], queryFn: () => api.get<SchoolClass[]>('/classes') })
+export const useCatalog = () => useQuery({ queryKey: ['catalog'], queryFn: () => api.get<Catalog>('/constraints/catalog'), staleTime: Infinity })
+export const useConstraints = () => useQuery({ queryKey: ['constraints'], queryFn: () => api.get<Constraint[]>('/constraints') })
 export const useLessons = () => useQuery({ queryKey: ['lessons'], queryFn: () => api.get<Lesson[]>('/lessons') })
 
 function byId<T extends { id: number }>(items: T[] | undefined): Map<number, T> {

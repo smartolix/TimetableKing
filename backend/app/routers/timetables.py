@@ -42,7 +42,7 @@ def start_solve(request: Request, session: Session, tt: models.Timetable, req: s
         raise HTTPException(409, "Für diesen Plan läuft schon eine Berechnung")
     tt.status, tt.message = "queued", ""
     session.commit()
-    request.app.state.runner.submit(tt.id, req.time_limit, req.keep_locked)
+    request.app.state.runner.submit(tt.id, req.time_limit, req.keep_locked, req.relax)
 
 
 @router.get("", response_model=list[schemas.TimetableSummary])
@@ -55,7 +55,7 @@ def create_timetable(data: schemas.TimetableCreate, request: Request, session: S
     tt = models.Timetable(name=data.name)
     session.add(tt)
     session.commit()
-    start_solve(request, session, tt, schemas.SolveRequest(time_limit=data.time_limit))
+    start_solve(request, session, tt, schemas.SolveRequest(time_limit=data.time_limit, relax=data.relax))
     return tt
 
 
@@ -65,7 +65,7 @@ def read_timetable(timetable_id: int, session: SessionDep):
 
 
 @router.patch("/{timetable_id}", response_model=schemas.TimetableSummary)
-def rename_timetable(timetable_id: int, data: schemas.TimetableCreate, session: SessionDep):
+def rename_timetable(timetable_id: int, data: schemas.TimetableRename, session: SessionDep):
     tt = get_timetable(session, timetable_id)
     tt.name = data.name
     session.commit()

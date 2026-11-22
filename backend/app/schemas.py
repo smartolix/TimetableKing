@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -132,11 +133,17 @@ class LessonOut(ORM):
 class TimetableCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     time_limit: int | None = Field(None, ge=1, le=3600)
+    relax: bool = False
+
+
+class TimetableRename(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
 
 
 class SolveRequest(BaseModel):
     time_limit: int | None = Field(None, ge=1, le=3600)
     keep_locked: bool = True
+    relax: bool = False
 
 
 class PlacementOut(ORM):
@@ -160,8 +167,14 @@ class TimetableSummary(ORM):
     updated_at: datetime
 
 
+class ReportEntry(BaseModel):
+    constraint_id: int
+    violations: int
+
+
 class TimetableOut(TimetableSummary):
     placements: list[PlacementOut]
+    report: list[ReportEntry] = Field(default_factory=list)
 
 
 class PlacementUpdate(BaseModel):
@@ -190,3 +203,21 @@ class Conflict(BaseModel):
 
 class ImportResult(BaseModel):
     counts: dict[str, int]
+
+
+# ---- Bedingungen ----
+
+Importance = Literal["off", "low", "normal", "high", "must"]
+
+
+class ConstraintIn(BaseModel):
+    type: str
+    importance: Importance = "normal"
+    active: bool = True
+    params: dict = Field(default_factory=dict)
+    note: str = Field("", max_length=200)
+
+
+class ConstraintOut(ConstraintIn, ORM):
+    id: int
+    position: int

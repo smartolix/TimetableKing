@@ -5,6 +5,8 @@ Quellen: offizielle Online-Hilfen (Stand November 2026), Links am Ende.
 
 Legende Spalte „TTK“: ✅ schon umgesetzt · ◐ teilweise · – fehlt
 
+> Stand der Spalte „TTK“: vor Einführung des Bedingungs-Menüs. Inzwischen umgesetzt sind die 26 Arten in `backend/app/constraint_catalog.py` (siehe README).
+
 ## Wichtigkeit / Gewichtung
 
 | Programm | Stufen |

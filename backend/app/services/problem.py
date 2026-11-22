@@ -4,7 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app import models
-from app.solver.cpsat import FixedCard, LessonSpec, Problem, Weights
+from app.constraint_catalog import IMPORTANCE, validate_params
+from app.solver.cpsat import ConstraintSpec, FixedCard, LessonSpec, Problem, Weights
 
 
 def get_settings(session: Session) -> models.SchoolSettings:
@@ -73,6 +74,7 @@ def build_problem(session: Session, fixed: list[models.Placement] | None = None)
                 teacher_ids=[t.id for t in lesson.teachers],
                 room_options=room_options(lesson),
                 cards=lesson.card_lengths(),
+                subject_id=lesson.subject_id,
             )
             for lesson in lessons
         ],
@@ -82,6 +84,7 @@ def build_problem(session: Session, fixed: list[models.Placement] | None = None)
         room_unavailable={r.id: _slots(r.unavailable, n_days, n_periods) for r in rooms},
         teacher_max_per_day={t.id: t.max_per_day for t in teachers if t.max_per_day},
         fixed=[FixedCard(f.lesson_id, f.day, f.period, f.length, f.room_id) for f in fixed or []],
+        constraints=load_constraint_specs(session, n_days, n_periods),
         teacher_names={t.id: t.short for t in teachers},
         class_names={c.id: c.name for c in classes},
         weights=Weights(
@@ -91,3 +94,38 @@ def build_problem(session: Session, fixed: list[models.Placement] | None = None)
             late_from=settings.late_from_period,
         ),
     )
+
+
+def known_ids(session: Session) -> dict[str, set[int]]:
+    return {
+        "teachers": set(session.scalars(select(models.Teacher.id))),
+        "classes": set(session.scalars(select(models.SchoolClass.id))),
+        "subjects": set(session.scalars(select(models.Subject.id))),
+        "rooms": set(session.scalars(select(models.Room.id))),
+    }
+
+
+def load_constraint_specs(session: Session, n_days: int, n_periods: int) -> list[ConstraintSpec]:
+    """Aktive Bedingungen für den Solver. Verweise auf gelöschte Einträge werden ignoriert."""
+    known = known_ids(session)
+    out = []
+    for c in session.scalars(
+        select(models.Constraint).order_by(models.Constraint.position, models.Constraint.id)
+    ):
+        if not c.active or c.importance == "off":
+            continue
+        params = dict(c.params or {})
+        for key, kind in (
+            ("teacher_ids", "teachers"),
+            ("class_ids", "classes"),
+            ("subject_ids", "subjects"),
+            ("room_ids", "rooms"),
+        ):
+            if key in params:
+                params[key] = [i for i in params[key] if i in known[kind]]
+        try:
+            params = validate_params(c.type, params, n_days, n_periods, known)
+        except ValueError:
+            continue  # z. B. Fach gelöscht: Bedingung ist nicht mehr anwendbar
+        out.append(ConstraintSpec(c.id, c.type, params, IMPORTANCE[c.importance], c.note))
+    return out

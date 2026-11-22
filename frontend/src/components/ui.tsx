@@ -111,3 +111,17 @@ export function SlotPicker({ days, periods, value, onChange }: {
     </table>
   )
 }
+
+export function RelaxOption({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="check" style={{ alignItems: 'flex-start' }}>
+      <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} />
+      <span>
+        Bedingungen lockern
+        <span className="field-hint" style={{ display: 'block' }}>
+          „Muss“-Bedingungen dürfen verletzt werden, wenn sonst kein Plan möglich ist. Verletzungen stehen danach im Bericht.
+        </span>
+      </span>
+    </label>
+  )
+}

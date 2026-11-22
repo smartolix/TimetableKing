@@ -130,6 +130,21 @@ class Lesson(Base):
         return [2] * doubles + [1] * singles
 
 
+class Constraint(Base):
+    """Eine Bedingung aus dem Katalog (app/constraint_catalog.py) mit Parametern und Wichtigkeit."""
+
+    __tablename__ = "constraints"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    type: Mapped[str] = mapped_column(String(60))
+    # off | low | normal | high | must
+    importance: Mapped[str] = mapped_column(String(10), default="normal")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -144,6 +159,8 @@ class Timetable(Base):
     message: Mapped[str] = mapped_column(Text, default="")
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     solve_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Ergebnis der Bedingungsprüfung: [{constraint_id, violations}]
+    report: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 

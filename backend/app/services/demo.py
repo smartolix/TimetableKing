@@ -135,4 +135,49 @@ def load_demo(session: Session) -> None:
                     double_periods=min(doubles, hours // 2),
                 )
             )
+    session.flush()
+
+    sid = {k: v.id for k, v in subjects.items()}
+    tid = {k: v.id for k, v in teachers.items()}
+    first_period = [[d, 0] for d in range(5)]
+    examples = [
+        ("teacher_max_consecutive", "normal", {"teacher_ids": [], "max": 4}, ""),
+        (
+            "teacher_free_day",
+            "high",
+            {"teacher_ids": [tid["HUB"]], "days": [0, 4]},
+            "Teilzeit: Mo oder Fr frei",
+        ),
+        ("teacher_max_gaps_week", "normal", {"teacher_ids": [], "max": 3}, ""),
+        ("class_first_period", "normal", {"class_ids": [], "late_days": 1}, ""),
+        ("class_max_gaps_day", "must", {"class_ids": [], "max": 0}, "Keine Hohlstunden für Schüler"),
+        (
+            "subject_forbidden_slots",
+            "high",
+            {"subject_ids": [sid["BSP"]], "class_ids": [], "slots": first_period, "only_doubles": False},
+            "Kein Turnen in der 1. Stunde",
+        ),
+        (
+            "subject_max_per_day",
+            "normal",
+            {"subject_ids": [sid["BE"], sid["ME"], sid["TEW"]], "class_ids": [], "max": 1},
+            "Höchstens ein kreatives Fach pro Tag",
+        ),
+        (
+            "subject_not_consecutive_days",
+            "low",
+            {"subject_ids": [sid["GW"], sid["GSP"], sid["BIO"]], "class_ids": [], "wrap": False},
+            "",
+        ),
+        (
+            "room_max_days",
+            "low",
+            {"room_ids": [rooms["TS2"].id], "max": 4},
+            "Turnsaal 2 einen Tag für Vereine frei",
+        ),
+    ]
+    session.add_all(
+        models.Constraint(type=t, importance=imp, params=params, note=note, position=i + 1)
+        for i, (t, imp, params, note) in enumerate(examples)
+    )
     session.commit()

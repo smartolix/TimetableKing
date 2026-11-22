@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, DAY_NAMES, DAY_SHORT, api, type Conflict, type Placement, type Timetable } from '../api'
-import { ErrorBox, Modal } from '../components/ui'
-import { useMasterData, type MasterData } from '../data'
+import { ErrorBox, Modal, RelaxOption } from '../components/ui'
+import { describe } from '../constraintText'
+import { useCatalog, useConstraints, useMasterData, type MasterData } from '../data'
 import { STATUS_LABEL } from '../format'
 
 type View = 'class' | 'teacher' | 'room'
@@ -52,6 +53,7 @@ export default function TimetableView() {
   const [pending, setPending] = useState<{ conflicts: Conflict[]; retry: () => void } | null>(null)
   const [resolveOpen, setResolveOpen] = useState(false)
   const [seconds, setSeconds] = useState(30)
+  const [relax, setRelax] = useState(false)
 
   const tt = useQuery({
     queryKey: ['timetable', ttId],
@@ -137,7 +139,7 @@ export default function TimetableView() {
     },
   })
   const resolve = useMutation({
-    mutationFn: () => api.post(`/timetables/${ttId}/solve`, { time_limit: seconds, keep_locked: true }),
+    mutationFn: () => api.post(`/timetables/${ttId}/solve`, { time_limit: seconds, keep_locked: true, relax }),
     onSuccess: () => { setResolveOpen(false); refresh() },
   })
 
@@ -241,6 +243,7 @@ export default function TimetableView() {
               <p className="muted small">Klicke auf einen Block, um ihn zu fixieren oder den Raum zu ändern. Fixierte Blöcke 📌 bleiben beim Neuberechnen, wo sie sind.</p>
             </div>
           )}
+          {data.status === 'done' && data.report.length > 0 && <ReportCard report={data.report} md={md} />}
           <div className="card">
             <h3>Konflikte {conflicts.data && <span className={conflicts.data.length ? 'badge bad' : 'badge good'}>{conflicts.data.length}</span>}</h3>
             {conflicts.data?.length === 0 && <p className="muted small">Keine Konflikte.</p>}
@@ -281,6 +284,7 @@ export default function TimetableView() {
             <label className="field"><span className="field-label">Rechenzeit (Sekunden)</span>
               <input type="number" min={5} max={3600} value={seconds} onChange={(e) => setSeconds(Number(e.target.value))} />
             </label>
+            <RelaxOption value={relax} onChange={setRelax} />
             <ErrorBox error={resolve.error} />
             <div className="form-actions">
               <button type="button" onClick={() => setResolveOpen(false)}>Abbrechen</button>
@@ -355,6 +359,42 @@ function Details({ p, md, conflicts, disabled, onLock, onRoom, onClose }: {
         <input type="checkbox" checked={p.locked} disabled={disabled} onChange={(e) => onLock(e.target.checked)} /> Fixiert (bleibt beim Neuberechnen)
       </label>
       {conflicts.length > 0 && <ul className="conflicts bad">{conflicts.map((c, i) => <li key={i}>{c.message}</li>)}</ul>}
+    </div>
+  )
+}
+
+function ReportCard({ report, md }: { report: Timetable['report']; md: MasterData }) {
+  const catalog = useCatalog()
+  const constraints = useConstraints()
+  const byId = new Map((constraints.data ?? []).map((c) => [c.id, c]))
+  const types = new Map((catalog.data?.types ?? []).map((t) => [t.key, t]))
+  const violated = report.filter((r) => r.violations > 0)
+  return (
+    <div className="card">
+      <h3>
+        Bedingungen
+        <span className={violated.length ? 'badge bad' : 'badge good'}>
+          {report.length - violated.length}/{report.length} erfüllt
+        </span>
+      </h3>
+      {violated.length === 0 && <p className="muted small">Alle aktiven Bedingungen sind erfüllt.</p>}
+      <ul className="report-list">
+        {violated.map((r) => {
+          const c = byId.get(r.constraint_id)
+          const t = c ? types.get(c.type) : undefined
+          return (
+            <li key={r.constraint_id} title={c && t ? describe(t, c.params, md) : ''}>
+              <span>
+                {t?.title ?? 'Gelöschte Bedingung'}
+                {c?.note && <span className="muted"> – {c.note}</span>}
+                {c && <span className={`imp ${c.importance}`} style={{ marginLeft: 6 }}>{catalog.data?.importance[c.importance]}</span>}
+              </span>
+              <strong className="warn">{r.violations}×</strong>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="muted small" style={{ marginTop: 8 }}><Link to="/bedingungen">Bedingungen bearbeiten</Link></p>
     </div>
   )
 }

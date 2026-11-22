@@ -6,7 +6,7 @@ from sqlalchemy.engine import Engine
 
 from app.config import settings
 from app.db import make_engine, make_session_factory
-from app.routers import files, masterdata, timetables
+from app.routers import constraints, files, masterdata, timetables
 from app.services.runner import SolverRunner
 
 
@@ -31,6 +31,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     app.include_router(masterdata.router)
     app.include_router(timetables.router)
     app.include_router(files.router)
+    app.include_router(constraints.router)
 
     @app.get("/api/health", tags=["System"])
     def health():

@@ -20,13 +20,17 @@ class SolverRunner:
         self.default_seconds = default_seconds
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="solver")
 
-    def submit(self, timetable_id: int, time_limit: int | None, keep_locked: bool) -> Future:
-        return self._pool.submit(self.run, timetable_id, time_limit or self.default_seconds, keep_locked)
+    def submit(
+        self, timetable_id: int, time_limit: int | None, keep_locked: bool, relax: bool = False
+    ) -> Future:
+        return self._pool.submit(
+            self.run, timetable_id, time_limit or self.default_seconds, keep_locked, relax
+        )
 
     def shutdown(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)
 
-    def run(self, timetable_id: int, time_limit: int, keep_locked: bool) -> None:
+    def run(self, timetable_id: int, time_limit: int, keep_locked: bool, relax: bool = False) -> None:
         with self.session_factory() as session:
             tt = session.get(models.Timetable, timetable_id)
             if tt is None:
@@ -46,7 +50,7 @@ class SolverRunner:
                     else []
                 )
                 problem = build_problem(session, fixed=locked)
-                result = solve(problem, time_limit=time_limit, workers=self.workers)
+                result = solve(problem, time_limit=time_limit, workers=self.workers, relax=relax)
                 tt = session.get(models.Timetable, timetable_id)
                 if tt is None:  # inzwischen gelöscht
                     return
@@ -70,6 +74,9 @@ class SolverRunner:
                 )
                 tt.status = "done"
                 tt.score = result.objective
+                tt.report = [
+                    {"constraint_id": cid, "violations": n} for cid, n in sorted(result.report.items())
+                ]
                 tt.message = (
                     "Optimaler Plan gefunden."
                     if result.status == "optimal"

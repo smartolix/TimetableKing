@@ -333,6 +333,7 @@ def import_workbook(session: Session, content: bytes) -> dict[str, int]:
 def clear_all(session: Session, keep_periods: bool = False) -> None:
     for model in (
         models.Timetable,
+        models.Constraint,
         models.Lesson,
         models.SchoolClass,
         models.Teacher,
