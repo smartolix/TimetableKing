@@ -80,9 +80,10 @@ function SettingsForm({ initial }: { initial: Settings }) {
 
         <h3>Gewichtung der weichen Regeln</h3>
         <p className="muted small">0 = egal. Je höher, desto stärker vermeidet der Rechner das. Harte Regeln (keine Doppelbelegung, Sperrzeiten) gelten immer.</p>
-        <div className="grid-4">
+        <div className="grid-5">
           <Field label="Hohlstunden Klassen"><input type="number" min={0} max={1000} value={form.weight_class_gap} onChange={(e) => set({ weight_class_gap: Number(e.target.value) })} /></Field>
           <Field label="Hohlstunden Lehrkräfte"><input type="number" min={0} max={1000} value={form.weight_teacher_gap} onChange={(e) => set({ weight_teacher_gap: Number(e.target.value) })} /></Field>
+          <Field label="Unerwünschte Zeiten"><input type="number" min={0} max={1000} value={form.weight_undesired} onChange={(e) => set({ weight_undesired: Number(e.target.value) })} /></Field>
           <Field label="Späte Stunden"><input type="number" min={0} max={1000} value={form.weight_late} onChange={(e) => set({ weight_late: Number(e.target.value) })} /></Field>
           <Field label="„Spät“ ab Stunde">
             <input type="number" min={1} max={20} value={form.late_from_period + 1} onChange={(e) => set({ late_from_period: Math.max(0, Number(e.target.value) - 1) })} />

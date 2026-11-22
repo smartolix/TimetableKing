@@ -7,22 +7,45 @@ export interface Settings {
   weight_class_gap: number
   weight_teacher_gap: number
   weight_late: number
+  weight_undesired: number
   late_from_period: number
   periods: Period[]
 }
 export interface Subject { id: number; short: string; name: string; color: string }
-export interface Teacher { id: number; short: string; name: string; max_per_day: number | null; unavailable: Slot[] }
+export interface Teacher {
+  id: number
+  short: string
+  name: string
+  target_hours: number | null
+  max_per_day: number | null
+  unavailable: Slot[]
+  undesired: Slot[]
+}
 export interface Room { id: number; short: string; name: string; capacity: number | null; unavailable: Slot[] }
-export interface SchoolClass { id: number; name: string; home_room_id: number | null; unavailable: Slot[] }
+export interface Group { id: number | null; name: string }
+export interface Division { id: number | null; name: string; groups: Group[] }
+export interface SchoolClass {
+  id: number
+  name: string
+  home_room_id: number | null
+  unavailable: Slot[]
+  undesired: Slot[]
+  divisions: Division[]
+}
+export interface LessonPart {
+  id: number | null
+  subject_id: number
+  teacher_ids: number[]
+  class_ids: number[]
+  group_ids: number[]
+  room_ids: number[]
+}
 export interface Lesson {
   id: number
-  subject_id: number
-  class_ids: number[]
-  teacher_ids: number[]
-  room_ids: number[]
   periods_per_week: number
   double_periods: number
   note: string
+  parts: LessonPart[]
 }
 export type TimetableStatus = 'draft' | 'queued' | 'running' | 'done' | 'failed'
 export interface TimetableSummary {
@@ -35,7 +58,7 @@ export interface TimetableSummary {
   created_at: string
   updated_at: string
 }
-export interface Placement { id: number; lesson_id: number; day: number; period: number; length: number; room_id: number | null; locked: boolean }
+export interface Placement { id: number; lesson_id: number; day: number; period: number; length: number; rooms: Record<string, number>; locked: boolean }
 export interface ReportEntry { constraint_id: number; violations: number }
 export interface Timetable extends TimetableSummary { placements: Placement[]; report: ReportEntry[] }
 

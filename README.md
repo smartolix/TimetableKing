@@ -9,9 +9,15 @@ Stundenplanprogramm für Schulen: Stammdaten erfassen, Stundenplan automatisch b
 ## Funktionen
 
 - **Stammdaten:** Zeitraster (mit Pausen), Fächer, Lehrkräfte, Räume, Klassen mit Stammraum
-- **Unterricht (Lehrfächerverteilung):** Fach, Klassen, Lehrkräfte, Wochenstunden, Doppelstunden, erlaubte Räume
-  - mehrere Klassen = gemeinsamer Unterricht, mehrere Lehrkräfte = Teamteaching
-  - ohne Raumangabe wird der Stammraum der Klasse verwendet; bei mehreren Räumen wählt der Solver einen
+- **Klassenteilungen und Gruppen:** z. B. Religion (RK/EV), Gruppen (G1/G2). Gruppen derselben Teilung können gleichzeitig unterschiedlichen Unterricht haben
+- **Unterricht (Lehrfächerverteilung)** pro Klasse oder Lehrkraft, mit Ist/Soll-Stunden
+  - ein Unterricht hat eine oder mehrere **Zeilen, die gleichzeitig stattfinden (Kopplung)**, z. B. Religion RK und EV parallel in verschiedenen Räumen
+  - mehrere Lehrkräfte in einer Zeile = **Teamteaching**
+  - Schüler einer Zeile: ganze Klassen und/oder einzelne Gruppen, auch klassenübergreifend (1a RK + 1b RK)
+  - „Zeile je Gruppe“ legt für eine Teilung automatisch eine Zeile pro Gruppe an
+  - ohne Raumangabe wird der Stammraum verwendet; bei mehreren Räumen wählt der Solver je Zeile einen
+- **Zeitwünsche** für Lehrkräfte und Klassen in drei Stufen: frei, unerwünscht (gewichtet vermieden), gesperrt
+- **Menü:** Stundenplan · Unterricht · Bedingungen · Stammdaten (Reiter Klassen, Lehrkräfte, Fächer, Räume, Zeitraster) · Import/Export. Die Dialoge von Lehrkräften, Klassen, Fächern und Räumen haben Reiter für Allgemein, Zeitwünsche, Bedingungen und Unterricht
 - **Automatische Planberechnung** im Hintergrund
   - harte Regeln: keine Doppelbelegung von Lehrkraft, Klasse oder Raum, Sperrzeiten, Höchststunden pro Tag, Doppelstunden nicht über Pausen, Stunden eines Unterrichts auf verschiedene Tage verteilt, fixierte Stunden bleiben
   - weiche Regeln (gewichtet): Hohlstunden für Klassen und Lehrkräfte, späte Stunden
@@ -28,9 +34,9 @@ Stundenplanprogramm für Schulen: Stammdaten erfassen, Stundenplan automatisch b
   - Blöcke gleicher Länge tauschen, Raum ändern, Stunden fixieren
   - Konfliktliste; Änderungen mit Konflikt nur nach Bestätigung
   - Neu berechnen, fixierte Stunden bleiben dabei erhalten
-- **Excel:** Vorlage, Import (alles oder nichts, mit Zeilennummern bei Fehlern), Export
+- **Excel:** Vorlage, Import (alles oder nichts, mit Zeilennummern bei Fehlern), Export; Kopplungen über die Spalte „Nr.“, Gruppen als „1a:RK“, Teilungen als „Religion=RK,EV“
 - **PDF:** Wochenpläne pro Klasse, Lehrkraft oder Raum
-- **Beispielschule** (Mittelschule, 8 Klassen, 16 Lehrkräfte) zum Ausprobieren
+- **Beispielschule** (Mittelschule, 8 Klassen, 17 Lehrkräfte, Religion als Kopplung, Technik in Gruppen, Teamteaching in Mathe) zum Ausprobieren
 
 ## Schnellstart mit Docker
 
@@ -100,6 +106,7 @@ backend/
     solver/cpsat.py     Solver (unabhängig von der Datenbank)
     solver/constraints.py  Umsetzung der Bedingungsarten
     services/
+      groups.py         Schülergruppen-Atome aus Teilungen
       problem.py        Stammdaten -> Solver-Problem
       runner.py         Berechnung im Hintergrund
       conflicts.py      Konfliktprüfung bei manuellen Änderungen
@@ -120,7 +127,6 @@ frontend/
 
 - Benutzerkonten und Rollen (Admin, Lehrkraft, Schüler/Eltern) mit Nur-Lese-Ansicht
 - Vertretungsplanung (Abwesenheiten, Vertretungsvorschläge)
-- Klassenteilungen und Gruppen (z. B. Religion, Werken in Gruppen)
 - weitere Bedingungsarten aus `docs/bedingungen-katalog.md` (z. B. gleichzeitiger Unterricht, gleiche Stunde jeden Tag, Raumkapazität, Gebäude), Zeitwünsche mit Stufen
 - Import aus aSc Stundenplan (`.roz`)
 - Mehrere Schulen bzw. Schuljahre

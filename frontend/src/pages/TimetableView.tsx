@@ -2,10 +2,12 @@ import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSe
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { ApiError, DAY_NAMES, DAY_SHORT, api, type Conflict, type Placement, type Timetable } from '../api'
+import { ApiError, DAY_NAMES, DAY_SHORT, api, type Conflict, type LessonPart, type Placement, type Timetable } from '../api'
 import { ErrorBox, Modal, RelaxOption } from '../components/ui'
 import { describe } from '../constraintText'
 import { useCatalog, useConstraints, useMasterData, type MasterData } from '../data'
+import { audienceText, groupIndex, lessonClassIds, lessonTeacherIds, partAtoms, partClassIds, type GroupInfo } from '../lessons'
+import { SubjectTag } from './MasterData'
 import { STATUS_LABEL } from '../format'
 
 type View = 'class' | 'teacher' | 'room'
@@ -22,23 +24,55 @@ const topEdge: CollisionDetection = ({ collisionRect, droppableRects, droppableC
 }
 const VIEW_LABEL: Record<View, string> = { class: 'Klassen', teacher: 'Lehrkräfte', room: 'Räume' }
 
-/** Welche Ressourcen (Lehrkraft/Klasse/Raum) belegt ein Block? */
-function resources(p: Placement, md: MasterData): string[] {
+/** Welche Ressourcen belegt ein Block? Lehrkräfte, Schülergruppen-Atome und gewählte Räume. */
+function resources(p: Placement, md: MasterData, groups: Map<number, GroupInfo>): string[] {
   const lesson = md.lessonById.get(p.lesson_id)
   if (!lesson) return []
   return [
-    ...lesson.teacher_ids.map((t) => `t${t}`),
-    ...lesson.class_ids.map((c) => `c${c}`),
-    ...(p.room_id != null ? [`r${p.room_id}`] : []),
+    ...lessonTeacherIds(lesson).map((t) => `t${t}`),
+    ...new Set(lesson.parts.flatMap((part) => partAtoms(part, md, groups)).map((a) => `a${a}`)),
+    ...Object.values(p.rooms ?? {}).map((r) => `r${r}`),
   ]
 }
 
-function belongs(p: Placement, view: View, id: number, md: MasterData): boolean {
+/** Zeilen eines Blocks, die zur gezeigten Klasse/Lehrkraft/Raum gehören. */
+function relevantParts(p: Placement, view: View, id: number, md: MasterData, groups: Map<number, GroupInfo>): LessonPart[] {
   const lesson = md.lessonById.get(p.lesson_id)
-  if (!lesson) return false
-  if (view === 'class') return lesson.class_ids.includes(id)
-  if (view === 'teacher') return lesson.teacher_ids.includes(id)
-  return p.room_id === id
+  if (!lesson) return []
+  if (view === 'class') return lesson.parts.filter((part) => partClassIds(part, groups).includes(id))
+  if (view === 'teacher') return lesson.parts.filter((part) => part.teacher_ids.includes(id))
+  return lesson.parts.filter((part) => part.id != null && p.rooms?.[String(part.id)] === id)
+}
+
+/** Parallele Blöcke an einem Tag nebeneinander: Spur je Block und Spurenzahl je Tag. */
+function layoutLanes(items: Placement[], days: number) {
+  const lane = new Map<number, number>()
+  const cluster = new Map<number, number>()  // Block -> Spurenzahl seines Überlappungs-Clusters
+  const perDay = Array.from({ length: days }, () => 1)
+  for (let d = 0; d < days; d++) {
+    const dayItems = items.filter((p) => p.day === d).sort((a, b) => a.period - b.period || b.length - a.length)
+    let group: Placement[] = []
+    let groupEnd = -1
+    const ends: number[] = []
+    const flush = () => {
+      const n = Math.max(1, ...group.map((p) => (lane.get(p.id) ?? 0) + 1))
+      group.forEach((p) => cluster.set(p.id, n))
+      perDay[d] = Math.max(perDay[d], n)
+      group = []
+      ends.length = 0
+    }
+    for (const p of dayItems) {
+      if (p.period >= groupEnd && group.length) flush()
+      let l = ends.findIndex((e) => e <= p.period)
+      if (l < 0) { l = ends.length; ends.push(0) }
+      ends[l] = p.period + p.length
+      lane.set(p.id, l)
+      group.push(p)
+      groupEnd = Math.max(groupEnd, p.period + p.length)
+    }
+    if (group.length) flush()
+  }
+  return { lane, cluster, perDay }
 }
 
 export default function TimetableView() {
@@ -81,7 +115,10 @@ export default function TimetableView() {
   const setEntity = (eid: number) => setParams({ ansicht: view, id: String(eid) })
 
   const placements = useMemo(() => tt.data?.placements ?? [], [tt.data])
-  const visible = placements.filter((p) => entityId != null && belongs(p, view, entityId, md))
+  const groups = useMemo(() => groupIndex(md.classes), [md.classes])
+  const visible = placements.filter((p) => entityId != null && relevantParts(p, view, entityId, md, groups).length > 0)
+  const lanes = layoutLanes(visible, md.settings?.days ?? 5)
+  const dayCol = (d: number) => 2 + lanes.perDay.slice(0, d).reduce((a, b) => a + b, 0)
   const conflictIds = new Set((conflicts.data ?? []).flatMap((c) => c.placement_ids))
   const days = md.settings?.days ?? 5
   const periods = md.settings?.periods ?? []
@@ -91,7 +128,7 @@ export default function TimetableView() {
   const occupancy = useMemo(() => {
     const occ = new Map<string, Map<string, number[]>>()
     for (const p of placements) {
-      for (const r of resources(p, md)) {
+      for (const r of resources(p, md, groups)) {
         if (!occ.has(r)) occ.set(r, new Map())
         for (let q = p.period; q < p.period + p.length; q++) {
           const k = `${p.day}:${q}`
@@ -100,24 +137,30 @@ export default function TimetableView() {
       }
     }
     return occ
-  }, [placements, md])
+  }, [placements, md, groups])
 
   /** Ist (tag, stunde) für den gezogenen Block frei? */
-  const fits = (p: Placement, day: number, period: number): 'ok' | 'conflict' | 'blocked' => {
+  const fits = (p: Placement, day: number, period: number): 'ok' | 'undesired' | 'conflict' | 'blocked' => {
     if (period + p.length > periods.length) return 'blocked'
     for (let q = period; q < period + p.length - 1; q++) if (periods[q]?.break_after) return 'blocked'
     const lesson = md.lessonById.get(p.lesson_id)
+    if (!lesson) return 'blocked'
+    const teacherIds = lessonTeacherIds(lesson)
+    const classIds = lessonClassIds(lesson, groups)
+    let undesired = false
     for (let q = period; q < period + p.length; q++) {
-      for (const r of resources(p, md)) {
+      for (const r of resources(p, md, groups)) {
         const ids = occupancy.get(r)?.get(`${day}:${q}`) ?? []
         if (ids.some((x) => x !== p.id)) return 'conflict'
       }
       const slot = (s: [number, number]) => s[0] === day && s[1] === q
-      if (lesson?.teacher_ids.some((t) => md.teacherById.get(t)?.unavailable.some(slot))) return 'conflict'
-      if (lesson?.class_ids.some((c) => md.classById.get(c)?.unavailable.some(slot))) return 'conflict'
-      if (p.room_id != null && md.roomById.get(p.room_id)?.unavailable.some(slot)) return 'conflict'
+      if (teacherIds.some((t) => md.teacherById.get(t)?.unavailable.some(slot))) return 'conflict'
+      if (classIds.some((c) => md.classById.get(c)?.unavailable.some(slot))) return 'conflict'
+      if (Object.values(p.rooms ?? {}).some((r) => md.roomById.get(r)?.unavailable.some(slot))) return 'conflict'
+      if (teacherIds.some((t) => md.teacherById.get(t)?.undesired.some(slot))) undesired = true
+      if (classIds.some((c) => md.classById.get(c)?.undesired.some(slot))) undesired = true
     }
-    return 'ok'
+    return undesired ? 'undesired' : 'ok'
   }
 
   const move = useMutation({
@@ -209,9 +252,14 @@ export default function TimetableView() {
 
       <div className="tt-layout">
         <DndContext sensors={sensors} collisionDetection={topEdge} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
-          <div className="tt-grid" style={{ gridTemplateColumns: `72px repeat(${days}, minmax(90px, 1fr))`, gridTemplateRows: `36px repeat(${periods.length}, minmax(58px, auto))` }}>
+          <div className="tt-scroll">
+          <div className="tt-grid" style={{
+            gridTemplateColumns: `72px ${lanes.perDay.map((n) => Array.from({ length: n }, () => `minmax(0, ${1 / n}fr)`).join(' ')).join(' ')}`,
+            gridTemplateRows: `36px repeat(${periods.length}, minmax(58px, auto))`,
+            minWidth: 72 + days * 100,
+          }}>
             <div className="tt-corner" />
-            {Array.from({ length: days }, (_, d) => <div key={d} className="tt-day" style={{ gridColumn: d + 2 }}><span className="long">{DAY_NAMES[d]}</span><span className="short">{DAY_SHORT[d]}</span></div>)}
+            {Array.from({ length: days }, (_, d) => <div key={d} className="tt-day" style={{ gridColumn: `${dayCol(d)} / span ${lanes.perDay[d]}` }}><span className="long">{DAY_NAMES[d]}</span><span className="short">{DAY_SHORT[d]}</span></div>)}
             {periods.map((p, i) => (
               <div key={p.id} className={`tt-period${p.break_after ? ' break' : ''}`} style={{ gridRow: i + 2 }}>
                 <strong>{p.label || `${i + 1}.`}</strong>
@@ -219,27 +267,35 @@ export default function TimetableView() {
               </div>
             ))}
             {Array.from({ length: days }, (_, d) => periods.map((p, i) => (
-              <DropCell key={`${d}:${i}`} day={d} period={i} breakAfter={p.break_after}
+              <DropCell key={`${d}:${i}`} day={d} period={i} breakAfter={p.break_after} col={dayCol(d)} span={lanes.perDay[d]}
                 state={dragging ? fits(dragging, d, i) : null} />
             )))}
-            {visible.map((p) => (
-              <Card key={p.id} p={p} md={md} view={view} selected={p.id === selected} conflict={conflictIds.has(p.id)}
-                disabled={!!busy} onSelect={() => setSelected(p.id === selected ? null : p.id)} />
-            ))}
+            {visible.map((p) => {
+              const n = lanes.cluster.get(p.id) ?? 1
+              const lane = lanes.lane.get(p.id) ?? 0
+              const width = n === 1 ? lanes.perDay[p.day] : 1
+              return (
+                <Card key={p.id} p={p} md={md} view={view} parts={relevantParts(p, view, entityId!, md, groups)} groups={groups}
+                  col={dayCol(p.day) + (n === 1 ? 0 : lane)} span={width} entityId={entityId!}
+                  selected={p.id === selected} conflict={conflictIds.has(p.id)}
+                  disabled={!!busy} onSelect={() => setSelected(p.id === selected ? null : p.id)} />
+              )
+            })}
+          </div>
           </div>
         </DndContext>
 
         <aside className="tt-side">
           {sel ? (
-            <Details p={sel} md={md} conflicts={(conflicts.data ?? []).filter((c) => c.placement_ids.includes(sel.id))}
+            <Details p={sel} md={md} groups={groups} conflicts={(conflicts.data ?? []).filter((c) => c.placement_ids.includes(sel.id))}
               disabled={!!busy}
               onLock={(locked) => move.mutate({ p: sel, body: { locked } })}
-              onRoom={(room_id) => move.mutate({ p: sel, body: room_id == null ? { clear_room: true } : { room_id } })}
+              onRoom={(partId, roomId) => move.mutate({ p: sel, body: { rooms: { [partId]: roomId } } })}
               onClose={() => setSelected(null)} />
           ) : (
             <div className="card">
               <h3>Bearbeiten</h3>
-              <p className="muted small">Ziehe einen Block in ein anderes Feld. <span className="legend ok" /> frei, <span className="legend conflict" /> Konflikt. Auf einen gleich langen Block ziehen tauscht die beiden.</p>
+              <p className="muted small">Ziehe einen Block in ein anderes Feld. <span className="legend ok" /> frei, <span className="legend undesired" /> unerwünscht, <span className="legend conflict" /> Konflikt. Auf einen gleich langen Block ziehen tauscht die beiden.</p>
               <p className="muted small">Klicke auf einen Block, um ihn zu fixieren oder den Raum zu ändern. Fixierte Blöcke 📌 bleiben beim Neuberechnen, wo sie sind.</p>
             </div>
           )}
@@ -259,7 +315,7 @@ export default function TimetableView() {
               <p className="muted small">Dieser Unterricht wurde nach der Berechnung angelegt oder geändert. „Neu berechnen“ setzt ihn ein.</p>
               <ul className="conflicts">
                 {unplaced.slice(0, 20).map((l) => (
-                  <li key={l.id}>{md.subjectById.get(l.subject_id)?.short} {l.class_ids.map((c) => md.classById.get(c)?.name).join('+')}</li>
+                  <li key={l.id}>{l.parts.map((p) => md.subjectById.get(p.subject_id)?.short).join('/')} {lessonClassIds(l, groups).map((c) => md.classById.get(c)?.name).join('+')}</li>
                 ))}
               </ul>
             </div>
@@ -297,64 +353,81 @@ export default function TimetableView() {
   )
 }
 
-function DropCell({ day, period, state, breakAfter }: { day: number; period: number; state: 'ok' | 'conflict' | 'blocked' | null; breakAfter: boolean }) {
+function DropCell({ day, period, state, breakAfter, col, span }: {
+  day: number; period: number; state: 'ok' | 'undesired' | 'conflict' | 'blocked' | null; breakAfter: boolean; col: number; span: number
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: `${day}:${period}`, disabled: state === 'blocked' })
   const cls = ['tt-cell', breakAfter ? 'break' : '', state ? `drop-${state}` : '', isOver ? 'over' : ''].filter(Boolean).join(' ')
-  return <div ref={setNodeRef} className={cls} style={{ gridColumn: day + 2, gridRow: period + 2 }} />
+  return <div ref={setNodeRef} className={cls} style={{ gridColumn: `${col} / span ${span}`, gridRow: period + 2 }} />
 }
 
-function Card({ p, md, view, selected, conflict, disabled, onSelect }: {
-  p: Placement; md: MasterData; view: View; selected: boolean; conflict: boolean; disabled: boolean; onSelect: () => void
+function Card({ p, md, view, parts, groups, col, span, entityId, selected, conflict, disabled, onSelect }: {
+  p: Placement; md: MasterData; view: View; parts: LessonPart[]; groups: Map<number, GroupInfo>; col: number; span: number; entityId: number
+  selected: boolean; conflict: boolean; disabled: boolean; onSelect: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: p.id, disabled })
-  const lesson = md.lessonById.get(p.lesson_id)
-  const subject = lesson ? md.subjectById.get(lesson.subject_id) : undefined
-  const teachers = lesson?.teacher_ids.map((t) => md.teacherById.get(t)?.short).join(', ') ?? ''
-  const classes = lesson?.class_ids.map((c) => md.classById.get(c)?.name).join(', ') ?? ''
-  const room = p.room_id != null ? md.roomById.get(p.room_id)?.short : ''
-  const lines = view === 'class' ? [teachers, room] : view === 'teacher' ? [classes, room] : [classes, teachers]
+  const first = md.subjectById.get(parts[0]?.subject_id ?? -1)
+  const lines = parts.map((part) => {
+    const subject = md.subjectById.get(part.subject_id)
+    const teachers = part.teacher_ids.map((t) => md.teacherById.get(t)?.short).join(', ')
+    const room = part.id != null && p.rooms?.[String(part.id)] != null ? md.roomById.get(p.rooms[String(part.id)])?.short : ''
+    const ownGroups = part.group_ids.map((g) => groups.get(g)).filter((g) => g && g.classId === entityId).map((g) => g!.name).join(', ')
+    const who = view === 'class' ? ownGroups : audienceText(part, md, groups)
+    const detail = view === 'class' ? [teachers, room] : view === 'teacher' ? [who, room] : [who, teachers]
+    const groupLabel = view === 'class' && who !== subject?.short ? who : ''
+    return { subject, who: groupLabel, detail: detail.filter(Boolean).join(' · ') }
+  })
   const style: React.CSSProperties = {
-    gridColumn: p.day + 2,
+    gridColumn: `${col} / span ${span}`,
     gridRow: `${p.period + 2} / span ${p.length}`,
-    ['--subject' as string]: subject?.color ?? '#9aa5b1',
+    ['--subject' as string]: first?.color ?? '#9aa5b1',
     transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
     zIndex: isDragging ? 20 : undefined,
   }
-  const cls = ['tt-card', selected ? 'selected' : '', conflict ? 'conflict' : '', isDragging ? 'dragging' : '', p.locked ? 'locked' : ''].filter(Boolean).join(' ')
+  const cls = ['tt-card', selected ? 'selected' : '', conflict ? 'conflict' : '', isDragging ? 'dragging' : '', p.locked ? 'locked' : '', parts.length > 1 ? 'multi' : ''].filter(Boolean).join(' ')
   return (
     <button ref={setNodeRef} className={cls} style={style} onClick={onSelect} {...listeners} {...attributes}
-      aria-label={`${subject?.name ?? subject?.short} ${classes} ${teachers} ${room}`}>
-      <span className="tt-subject">{subject?.short}{p.locked && <span className="pin" aria-label="fixiert">📌</span>}</span>
-      {lines.filter(Boolean).map((l, i) => <span key={i} className="tt-line">{l}</span>)}
+      aria-label={lines.map((l) => `${l.subject?.name ?? l.subject?.short} ${l.who} ${l.detail}`).join('; ')}>
+      {lines.map((l, i) => (
+        <span key={i} className="tt-part">
+          <span className="tt-subject">{l.subject?.short}{l.who && <span className="tt-group"> {l.who}</span>}{i === 0 && p.locked && <span className="pin" aria-label="fixiert">📌</span>}</span>
+          {l.detail && <span className="tt-line">{l.detail}</span>}
+        </span>
+      ))}
     </button>
   )
 }
 
-function Details({ p, md, conflicts, disabled, onLock, onRoom, onClose }: {
-  p: Placement; md: MasterData; conflicts: Conflict[]; disabled: boolean
-  onLock: (locked: boolean) => void; onRoom: (room: number | null) => void; onClose: () => void
+function Details({ p, md, groups, conflicts, disabled, onLock, onRoom, onClose }: {
+  p: Placement; md: MasterData; groups: Map<number, GroupInfo>; conflicts: Conflict[]; disabled: boolean
+  onLock: (locked: boolean) => void; onRoom: (partId: number, room: number | null) => void; onClose: () => void
 }) {
   const lesson = md.lessonById.get(p.lesson_id)
-  const subject = lesson ? md.subjectById.get(lesson.subject_id) : undefined
   const period = md.settings?.periods[p.period]
+  if (!lesson) return null
   return (
     <div className="card">
       <div className="card-head">
-        <h3><span className="subject-tag" style={{ background: subject?.color }}>{subject?.short}</span> {subject?.name}</h3>
+        <h3>{lesson.parts.length > 1 ? 'Gekoppelter Unterricht' : <><SubjectTag md={md} id={lesson.parts[0].subject_id} /> {md.subjectById.get(lesson.parts[0].subject_id)?.name}</>}</h3>
         <button className="icon" onClick={onClose} aria-label="Schließen">×</button>
       </div>
-      <dl className="details">
-        <dt>Zeit</dt><dd>{DAY_NAMES[p.day]}, {period?.label ?? p.period + 1}{p.length > 1 ? ` (${p.length} Stunden)` : ''}</dd>
-        <dt>Klassen</dt><dd>{lesson?.class_ids.map((c) => md.classById.get(c)?.name).join(', ')}</dd>
-        <dt>Lehrkräfte</dt><dd>{lesson?.teacher_ids.map((t) => md.teacherById.get(t)?.short).join(', ') || '–'}</dd>
-        <dt>Raum</dt>
-        <dd>
-          <select value={p.room_id ?? ''} disabled={disabled} onChange={(e) => onRoom(e.target.value ? Number(e.target.value) : null)} aria-label="Raum">
-            <option value="">– kein Raum –</option>
-            {md.rooms.map((r) => <option key={r.id} value={r.id}>{r.short}{r.name ? ` – ${r.name}` : ''}</option>)}
-          </select>
-        </dd>
-      </dl>
+      <p className="small" style={{ margin: '0 0 8px' }}>{DAY_NAMES[p.day]}, {period?.label ?? p.period + 1}{p.length > 1 ? ` (${p.length} Stunden)` : ''}</p>
+      {lesson.parts.map((part, i) => (
+        <div key={part.id ?? i} className="detail-part">
+          <div className="small"><SubjectTag md={md} id={part.subject_id} /> {audienceText(part, md, groups)}</div>
+          <div className="small muted">
+            {part.teacher_ids.map((t) => md.teacherById.get(t)?.short).join(', ') || 'keine Lehrkraft'}
+            {part.teacher_ids.length > 1 && <span className="tag">Teamteaching</span>}
+          </div>
+          {part.id != null && (
+            <select value={p.rooms?.[String(part.id)] ?? ''} disabled={disabled} aria-label="Raum"
+              onChange={(e) => onRoom(part.id!, e.target.value ? Number(e.target.value) : null)}>
+              <option value="">– kein Raum –</option>
+              {md.rooms.map((r) => <option key={r.id} value={r.id}>{r.short}{r.name ? ` – ${r.name}` : ''}</option>)}
+            </select>
+          )}
+        </div>
+      ))}
       <label className="check">
         <input type="checkbox" checked={p.locked} disabled={disabled} onChange={(e) => onLock(e.target.checked)} /> Fixiert (bleibt beim Neuberechnen)
       </label>

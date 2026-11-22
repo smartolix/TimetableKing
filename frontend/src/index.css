@@ -289,3 +289,73 @@ table.list.compact input { width: 100%; }
   .picker { flex-direction: column; }
   .picker-cats { width: auto; flex-direction: row; flex-wrap: wrap; }
 }
+
+/* ---- Zeitwünsche ---- */
+.time-prefs { display: flex; flex-direction: column; gap: 8px; }
+.slot-picker .cell.free { background: var(--ok-soft); }
+.slot-picker .cell.undesired { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); font-weight: 700; }
+.slot-picker .cell.blocked { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 700; }
+.legend-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.legend-cell { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 16px; border-radius: 3px; border: 1px solid var(--border); vertical-align: -3px; margin-right: 4px; font-size: 0.7rem; }
+.legend-cell.free { background: var(--ok-soft); }
+.legend-cell.undesired { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.legend-cell.blocked { background: var(--danger); border-color: var(--danger); color: #fff; }
+.sub-head { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 10px 0 0; }
+.badge { font-size: 0.75rem; padding: 1px 8px; border-radius: 10px; background: var(--surface-2); color: var(--muted); font-weight: 600; }
+
+/* ---- Stammdaten ---- */
+.subnav { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: -8px 0 18px; flex-wrap: wrap; }
+.subnav a { padding: 8px 14px; color: var(--muted); text-decoration: none; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.subnav a:hover { color: var(--text); }
+.subnav a.active { color: var(--accent); border-bottom-color: var(--accent); }
+.dialog-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: -4px 0 14px; flex-wrap: wrap; }
+.dialog-tabs button { border: none; border-radius: 6px 6px 0 0; background: none; padding: 7px 12px; color: var(--muted); font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.dialog-tabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
+.dialog-body { min-height: 260px; }
+.divisions { display: flex; flex-direction: column; gap: 8px; }
+.division { display: grid; grid-template-columns: 160px 1fr auto; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.chip.removable { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 8px; }
+.chip.removable input { border: none; background: transparent; color: inherit; padding: 0; font-weight: 600; min-width: 2ch; }
+.chip.removable button { border: none; background: transparent; color: inherit; padding: 0 4px; font-size: 1rem; line-height: 1; }
+.add-group input { width: 90px; padding: 3px 8px; border-radius: 14px; font-size: 0.85rem; }
+.hours { font-variant-numeric: tabular-nums; font-weight: 600; padding: 1px 6px; border-radius: 6px; }
+.hours.ok { background: var(--ok-soft); color: var(--ok); }
+.hours.under { background: var(--warn-soft); color: var(--warn); }
+.hours.over { background: var(--danger-soft); color: var(--danger); }
+tr.coupled td { border-top: none; padding-top: 2px; }
+@media (max-width: 640px) { .division { grid-template-columns: 1fr; } }
+
+/* ---- Unterricht ---- */
+.split { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
+.entity-list { display: flex; flex-direction: column; gap: 2px; max-height: calc(100vh - 220px); overflow: auto; position: sticky; top: 76px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; }
+.entity-list button { justify-content: space-between; border-color: transparent; text-align: left; white-space: normal; }
+.entity-list button.on { background: var(--accent-soft); color: var(--accent); }
+table.lessons tbody.lesson-group { border-bottom: 2px solid var(--border); }
+table.lessons tbody.lesson-group tr td { border-bottom: 1px dashed var(--border); }
+table.lessons tbody.lesson-group:hover { background: var(--surface-2); }
+.note-row td { padding-top: 2px !important; font-style: italic; }
+.tag { display: inline-block; margin-left: 6px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+  padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); vertical-align: 1px; }
+.parts { display: flex; flex-direction: column; gap: 10px; }
+.part { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px 14px; position: relative; display: flex; flex-direction: column; gap: 10px; }
+.part legend { font-weight: 700; padding: 0 6px; }
+.part-remove { position: absolute; top: -4px; right: 8px; }
+.audience { display: flex; flex-direction: column; gap: 3px; max-height: 210px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; }
+.aud-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 4px; border-radius: 6px; }
+.aud-row.active { background: var(--accent-soft); }
+.aud-div { display: inline-flex; gap: 3px; padding-left: 6px; border-left: 1px solid var(--border); }
+.chip.small { padding: 2px 8px; font-size: 0.78rem; }
+@media (max-width: 900px) { .split { grid-template-columns: 1fr; } .entity-list { position: static; flex-direction: row; flex-wrap: wrap; max-height: none; } }
+.grid-5 { display: grid; gap: 14px; grid-template-columns: repeat(5, 1fr); } @media (max-width: 1000px) { .grid-5 { grid-template-columns: repeat(2, 1fr); } } @media (max-width: 640px) { .grid-5 { grid-template-columns: 1fr; } }
+
+/* ---- Planansicht: Kopplungen und Gruppen ---- */
+.tt-scroll { overflow-x: auto; min-width: 0; }
+.tt-part { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.tt-card.multi { gap: 3px; justify-content: space-evenly; }
+.tt-card.multi .tt-part + .tt-part { border-top: 1px dashed color-mix(in srgb, var(--subject) 55%, var(--surface)); padding-top: 2px; width: 100%; }
+.tt-group { font-weight: 600; font-size: 0.75rem; color: var(--muted); }
+.tt-cell.drop-undesired { background: var(--warn-soft); }
+.legend.undesired { background: var(--warn-soft); }
+.detail-part { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid var(--border); }
+.detail-part select { width: 100%; }

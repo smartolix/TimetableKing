@@ -3,20 +3,15 @@ import { useSettings } from './data'
 import Constraints from './pages/Constraints'
 import ImportExport from './pages/ImportExport'
 import Lessons from './pages/Lessons'
-import { ClassesPage, RoomsPage, SubjectsPage, TeachersPage } from './pages/MasterData'
-import SettingsPage from './pages/Settings'
+import MasterDataPage from './pages/MasterData'
 import TimetableView from './pages/TimetableView'
 import Timetables from './pages/Timetables'
 
 const NAV = [
-  { to: '/plaene', label: 'Pläne' },
+  { to: '/plaene', label: 'Stundenplan' },
   { to: '/unterricht', label: 'Unterricht' },
   { to: '/bedingungen', label: 'Bedingungen' },
-  { to: '/klassen', label: 'Klassen' },
-  { to: '/lehrkraefte', label: 'Lehrkräfte' },
-  { to: '/faecher', label: 'Fächer' },
-  { to: '/raeume', label: 'Räume' },
-  { to: '/einstellungen', label: 'Zeitraster' },
+  { to: '/stammdaten', label: 'Stammdaten' },
   { to: '/daten', label: 'Import/Export' },
 ]
 
@@ -47,11 +42,11 @@ export default function App() {
           <Route path="/plaene/:id" element={<TimetableView />} />
           <Route path="/unterricht" element={<Lessons />} />
           <Route path="/bedingungen" element={<Constraints />} />
-          <Route path="/klassen" element={<ClassesPage />} />
-          <Route path="/lehrkraefte" element={<TeachersPage />} />
-          <Route path="/faecher" element={<SubjectsPage />} />
-          <Route path="/raeume" element={<RoomsPage />} />
-          <Route path="/einstellungen" element={<SettingsPage />} />
+          <Route path="/stammdaten" element={<Navigate to="/stammdaten/klassen" replace />} />
+          <Route path="/stammdaten/:tab" element={<MasterDataPage />} />
+          <Route path="/klassen" element={<Navigate to="/stammdaten/klassen" replace />} />
+          <Route path="/lehrkraefte" element={<Navigate to="/stammdaten/lehrkraefte" replace />} />
+          <Route path="/einstellungen" element={<Navigate to="/stammdaten/zeitraster" replace />} />
           <Route path="/daten" element={<ImportExport />} />
           <Route path="*" element={<p>Seite nicht gefunden.</p>} />
         </Routes>
