@@ -1,5 +1,6 @@
 """Pläne: erzeugen, berechnen, manuell bearbeiten, Konflikte prüfen."""
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -108,6 +109,7 @@ def _check_or_rollback(session: Session, tt: models.Timetable, ids: set[int], fo
         raise HTTPException(
             409, {"message": "Die Änderung erzeugt Konflikte", "conflicts": [c.model_dump() for c in found]}
         )
+    tt.updated_at = datetime.now(UTC)
 
 
 @router.patch("/{timetable_id}/placements/{placement_id}", response_model=schemas.PlacementOut)
