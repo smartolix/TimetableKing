@@ -29,16 +29,43 @@ Slot = tuple[int, int]  # (tag, stunde)
 
 
 @dataclass
+class PartSpec:
+    """Eine Zeile eines Unterrichts. Alle Zeilen eines Unterrichts finden gleichzeitig statt."""
+
+    id: int
+    subject_id: int | None
+    teacher_ids: list[int]
+    # Schülergruppen („Atome“, siehe app/services/groups.py). Ohne Teilungen: eine Einheit pro Klasse.
+    class_ids: list[int]
+    # Räume, aus denen einer gewählt wird. Leer = kein Raum nötig.
+    room_options: list[int]
+
+
+@dataclass
 class LessonSpec:
     id: int
     label: str
     class_ids: list[int]
     teacher_ids: list[int]
-    # Räume, aus denen einer gewählt wird. Leer = kein Raum nötig.
     room_options: list[int]
     # Länge jedes Blocks, z. B. [2, 1, 1]
     cards: list[int]
     subject_id: int | None = None
+    # Zeilen (Kopplung). Leer = eine Zeile aus den Feldern oben.
+    parts: list[PartSpec] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.parts:
+            self.parts = [PartSpec(0, self.subject_id, self.teacher_ids, self.class_ids, self.room_options)]
+        else:
+            self.teacher_ids = sorted({t for p in self.parts for t in p.teacher_ids})
+            self.class_ids = sorted({c for p in self.parts for c in p.class_ids})
+            self.subject_id = self.parts[0].subject_id
+            self.room_options = []
+
+    @property
+    def subject_ids(self) -> set[int]:
+        return {p.subject_id for p in self.parts if p.subject_id is not None}
 
 
 @dataclass
@@ -47,7 +74,8 @@ class FixedCard:
     day: int
     period: int
     length: int
-    room_id: int | None
+    # Raum je Zeile {part_id: room_id}
+    rooms: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -66,6 +94,7 @@ class Weights:
     class_gap: int = 20
     teacher_gap: int = 3
     late: int = 2
+    undesired: int = 10
     late_from: int = 6  # 0-basierte Stunde, ab der "spät" gilt
 
 
@@ -79,6 +108,10 @@ class Problem:
     teacher_unavailable: dict[int, set[Slot]] = field(default_factory=dict)
     class_unavailable: dict[int, set[Slot]] = field(default_factory=dict)
     room_unavailable: dict[int, set[Slot]] = field(default_factory=dict)
+    teacher_undesired: dict[int, set[Slot]] = field(default_factory=dict)
+    class_undesired: dict[int, set[Slot]] = field(default_factory=dict)
+    # Klasse -> Schülergruppen-Atome (für Bedingungen mit Klassenauswahl). Leer = jede ID ist eine Klasse.
+    class_atoms: dict[int, list[int]] = field(default_factory=dict)
     teacher_max_per_day: dict[int, int] = field(default_factory=dict)
     fixed: list[FixedCard] = field(default_factory=list)
     constraints: list[ConstraintSpec] = field(default_factory=list)
@@ -94,7 +127,7 @@ class PlacedCard:
     day: int
     period: int
     length: int
-    room_id: int | None
+    rooms: dict[int, int] = field(default_factory=dict)  # {part_id: room_id}
     locked: bool = False
 
 
@@ -189,7 +222,9 @@ class Builder:
         self.nD, self.nP = problem.n_days, problem.n_periods
         self.m = cp_model.CpModel()
         self.occ: dict[tuple[str, int, int, int], list] = defaultdict(list)  # ("t"|"c"|"r", id, tag, stunde)
-        self.options: list[list[tuple]] = []  # pro Karte: (var, tag, stunde, raum)
+        self.options: list[list[tuple]] = []  # pro Karte: (var, tag, stunde, None)
+        # pro Karte: (tag, stunde, part_id, raum, var) – Raumwahl je Zeile
+        self.room_choice: dict[int, list[tuple]] = defaultdict(list)
         self.objective: list = []
         self.violations: dict[int, list] = defaultdict(list)  # Bedingungs-ID -> Verletzungs-Terme
         self._busy: dict = {}
@@ -198,7 +233,8 @@ class Builder:
         self._any: dict = {}
         self.teachers = sorted({t for lesson in problem.lessons for t in lesson.teacher_ids})
         self.classes = sorted({c for lesson in problem.lessons for c in lesson.class_ids})
-        self.rooms = sorted({r for lesson in problem.lessons for r in lesson.room_options})
+        self.rooms = sorted({r for lesson in problem.lessons for p in lesson.parts for r in p.room_options})
+        self.class_atoms = problem.class_atoms or {c: [c] for c in self.classes}
 
     # ---- Grundgrößen ----
 
@@ -349,22 +385,37 @@ def solve(
         # Doppelstunde darf nicht über eine Pause gehen
         return any(p in problem.break_after for p in range(start, start + length - 1))
 
+    atom_class = {a: c for c, atoms in problem.class_atoms.items() for a in atoms}
+    undesired_terms = []
+
+    def n_classes(atom_ids) -> int:
+        return len({atom_class.get(a, a) for a in atom_ids})
+
+    def room_free(r: int, d: int, p: int, length: int) -> bool:
+        return not any((d, q) in problem.room_unavailable.get(r, ()) for q in range(p, p + length))
+
     for k, card in enumerate(cards):
         lesson, length = card.lesson, card.length
         opts: list[tuple] = []
-        if card.fixed is not None:
-            f = card.fixed
-            domain = [(f.day, f.period, f.room_id)]
+        f = card.fixed
+        # Raumoptionen je Zeile (fixiert: nur der gespeicherte Raum)
+        part_rooms: list[tuple[int, list[int]]] = []
+        forced: set[int] = set()  # Zeilen mit gespeichertem Raum eines fixierten Blocks
+        for part in lesson.parts:
+            if f is not None and part.id in f.rooms:
+                part_rooms.append((part.id, [f.rooms[part.id]]))
+                forced.add(part.id)
+            else:
+                part_rooms.append((part.id, list(part.room_options)))
+        if f is not None:
+            domain = [(f.day, f.period)]
         else:
-            rooms: list[int | None] = list(lesson.room_options) or [None]
             domain = [
-                (d, p, r)
+                (d, p)
                 for d in range(nD)
                 for p in range(nP - length + 1)
                 if not blocked(lesson, d, p, length)
-                for r in rooms
-                if r is None
-                or not any((d, q) in problem.room_unavailable.get(r, ()) for q in range(p, p + length))
+                and all(not rs or any(room_free(r, d, p, length) for r in rs) for _pid, rs in part_rooms)
             ]
         if not domain:
             return Solution(
@@ -374,22 +425,40 @@ def solve(
                 time.monotonic() - started,
                 [f"{lesson.label}: Für einen Block gibt es keinen möglichen Termin (Sperrzeiten prüfen)."],
             )
-        for d, p, r in domain:
-            v = m.new_bool_var(f"x{k}_{d}_{p}_{r}")
-            opts.append((v, d, p, r))
+        for d, p in domain:
+            v = m.new_bool_var(f"x{k}_{d}_{p}")
+            opts.append((v, d, p, None))
             for q in range(p, p + length):
                 for t in lesson.teacher_ids:
                     b.occ[("t", t, d, q)].append(v)
                 for c in lesson.class_ids:
                     b.occ[("c", c, d, q)].append(v)
-                if r is not None:
-                    b.occ[("r", r, d, q)].append(v)
                 if q >= problem.weights.late_from:
-                    late_terms.append(v * len(lesson.class_ids))
+                    late_terms.append(v * n_classes(lesson.class_ids))
+                bad = sum(1 for t in lesson.teacher_ids if (d, q) in problem.teacher_undesired.get(t, ()))
+                bad += n_classes(
+                    [c for c in lesson.class_ids if (d, q) in problem.class_undesired.get(c, ())]
+                )
+                if bad:
+                    undesired_terms.append(v * bad)
+            # Räume: je Zeile einen Raum wählen, wenn der Block hier liegt
+            for pid, rs in part_rooms:
+                usable = rs if pid in forced else [r for r in rs if room_free(r, d, p, length)]
+                if not usable:
+                    continue
+                if len(usable) == 1:
+                    choice = [(usable[0], v)]
+                else:
+                    choice = [(r, m.new_bool_var("")) for r in usable]
+                    m.add(sum(z for _r, z in choice) == v)
+                for r, z in choice:
+                    b.room_choice[k].append((d, p, pid, r, z))
+                    for q in range(p, p + length):
+                        b.occ[("r", r, d, q)].append(z)
             lesson_day[(lesson.id, d)].append(v)
-        if card.fixed is not None:
+        if f is not None:
             m.add(opts[0][0] == 1)
-            lesson_day_fixed[(lesson.id, card.fixed.day)] += 1
+            lesson_day_fixed[(lesson.id, f.day)] += 1
         else:
             m.add_exactly_one(v for v, *_ in opts)
         b.options.append(opts)
@@ -425,6 +494,8 @@ def solve(
         b.objective += [w.teacher_gap * g for t in b.teachers for d in range(nD) for g in b.gaps("t", t, d)]
     if w.late:
         b.objective += [w.late * t for t in late_terms]
+    if w.undesired:
+        b.objective += [w.undesired * t for t in undesired_terms]
     if b.objective:
         m.minimize(sum(b.objective))
 
@@ -452,11 +523,16 @@ def solve(
         return Solution(status_name, [], None, seconds, [msg])
 
     placements = []
-    for card, opts in zip(cards, b.options, strict=True):
-        for v, d, p, r in opts:
+    for k, (card, opts) in enumerate(zip(cards, b.options, strict=True)):
+        for v, d, p, _ in opts:
             if solver.boolean_value(v):
+                rooms = {
+                    pid: r
+                    for d2, p2, pid, r, z in b.room_choice[k]
+                    if (d2, p2) == (d, p) and solver.boolean_value(z)
+                }
                 placements.append(
-                    PlacedCard(card.lesson.id, d, p, card.length, r, locked=card.fixed is not None)
+                    PlacedCard(card.lesson.id, d, p, card.length, rooms, locked=card.fixed is not None)
                 )
                 break
     report = {

@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session, selectinload
 from app import models, schemas
 from app.db import get_session
 from app.services.conflicts import find_conflicts
-from app.services.problem import get_settings, load_lessons, load_periods
+from app.services.groups import build_atoms
+from app.services.problem import get_settings, load_classes, load_lessons, load_periods
 
 router = APIRouter(prefix="/api/timetables", tags=["Pläne"])
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -33,7 +34,13 @@ def conflicts_for(
     lessons = {lesson.id: lesson for lesson in load_lessons(session)}
     rooms = {r.id: r for r in session.scalars(select(models.Room))}
     return find_conflicts(
-        tt.placements, lessons, get_settings(session).days, load_periods(session), rooms, only=only
+        tt.placements,
+        lessons,
+        get_settings(session).days,
+        load_periods(session),
+        rooms,
+        build_atoms(load_classes(session)),
+        only=only,
     )
 
 
@@ -123,12 +130,20 @@ def update_placement(
         pl.day = data.day
     if data.period is not None:
         pl.period = data.period
-    if data.clear_room:
-        pl.room_id = None
-    elif data.room_id is not None:
-        if session.get(models.Room, data.room_id) is None:
-            raise HTTPException(422, "Unbekannter Raum")
-        pl.room_id = data.room_id
+    if data.rooms is not None:
+        lesson = session.get(models.Lesson, pl.lesson_id)
+        part_ids = {p.id for p in lesson.parts} if lesson else set()
+        rooms = dict(pl.rooms or {})
+        for part_id, room_id in data.rooms.items():
+            if part_id not in part_ids:
+                raise HTTPException(422, "Zeile gehört nicht zu diesem Unterricht")
+            if room_id is None:
+                rooms.pop(str(part_id), None)
+            elif session.get(models.Room, room_id) is None:
+                raise HTTPException(422, "Unbekannter Raum")
+            else:
+                rooms[str(part_id)] = room_id
+        pl.rooms = rooms
     if data.locked is not None:
         pl.locked = data.locked
     _check_or_rollback(session, tt, {pl.id}, data.force)

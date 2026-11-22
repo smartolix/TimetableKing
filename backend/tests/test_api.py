@@ -21,36 +21,22 @@ def setup_small(client):
     r = client.post("/api/rooms", json={"short": "R1"}).json()
     c1 = client.post("/api/classes", json={"name": "1a", "home_room_id": r["id"]}).json()
     c2 = client.post("/api/classes", json={"name": "1b"}).json()
-    lessons = [
-        client.post(
+
+    def lesson(subject, cls, teacher, hours, doubles=0):
+        res = client.post(
             "/api/lessons",
             json={
-                "subject_id": m["id"],
-                "class_ids": [c1["id"]],
-                "teacher_ids": [t1["id"]],
-                "periods_per_week": 4,
+                "periods_per_week": hours,
+                "double_periods": doubles,
+                "parts": [
+                    {"subject_id": subject["id"], "class_ids": [cls["id"]], "teacher_ids": [teacher["id"]]}
+                ],
             },
-        ).json(),
-        client.post(
-            "/api/lessons",
-            json={
-                "subject_id": d["id"],
-                "class_ids": [c1["id"]],
-                "teacher_ids": [t2["id"]],
-                "periods_per_week": 4,
-                "double_periods": 1,
-            },
-        ).json(),
-        client.post(
-            "/api/lessons",
-            json={
-                "subject_id": m["id"],
-                "class_ids": [c2["id"]],
-                "teacher_ids": [t1["id"]],
-                "periods_per_week": 3,
-            },
-        ).json(),
-    ]
+        )
+        assert res.status_code == 201, res.text
+        return res.json()
+
+    lessons = [lesson(m, c1, t1, 4), lesson(d, c1, t2, 4, 1), lesson(m, c2, t1, 3)]
     return {"m": m, "t1": t1, "t2": t2, "r": r, "c1": c1, "c2": c2, "lessons": lessons}
 
 
@@ -91,9 +77,9 @@ def test_solve_move_conflicts_and_pdf(client):
     # Raum: Stammraum für 1a, keiner für 1b
     for p in tt["placements"]:
         if p["lesson_id"] == data["lessons"][2]["id"]:
-            assert p["room_id"] is None
+            assert p["rooms"] == {}
         else:
-            assert p["room_id"] == data["r"]["id"]
+            assert list(p["rooms"].values()) == [data["r"]["id"]]
 
     # Verschieben in eine gesperrte Zeit -> 409, mit force erlaubt
     pl = next(p for p in tt["placements"] if p["lesson_id"] in hub_lessons)
@@ -133,7 +119,8 @@ def test_excel_roundtrip(client):
     exported = client.get("/api/excel/export")
     assert exported.status_code == 200
     wb = load_workbook(io.BytesIO(exported.content))
-    assert wb["Lehrkräfte"]["D2"].value in ("", None) or "Mo1-2" in str(wb["Lehrkräfte"]["D3"].value)
+    rows = {r[0]: r for r in wb["Lehrkräfte"].iter_rows(min_row=2, values_only=True)}
+    assert rows["HUB"][4] == "Mo1-2"
     res = client.post("/api/excel/import", files={"file": ("x.xlsx", exported.content)})
     assert res.status_code == 200, res.text
     assert res.json()["counts"]["Unterricht"] == 3
@@ -144,7 +131,7 @@ def test_excel_roundtrip(client):
 def test_excel_import_reports_errors(client):
     wb_bytes = client.get("/api/excel/template").content
     wb = load_workbook(io.BytesIO(wb_bytes))
-    wb["Unterricht"].append(["9z", "XX", "NOPE", 2, 0, "", ""])
+    wb["Unterricht"].append([None, "9z", "XX", "NOPE", 2, 0, "", ""])
     buf = io.BytesIO()
     wb.save(buf)
     res = client.post("/api/excel/import", files={"file": ("x.xlsx", buf.getvalue())})
@@ -192,3 +179,79 @@ def test_constraint_api(client):
             per_day[p["day"]] = per_day.get(p["day"], 0) + p["length"]
     assert max(per_day.values()) <= 2
     assert client.delete(f"/api/constraints/{cid}").status_code == 204
+
+
+def test_divisions_and_coupled_lesson(client):
+    client.put("/api/settings", json={"days": 5, "periods": [{"label": f"{i + 1}."} for i in range(5)]})
+    rk = client.post("/api/subjects", json={"short": "RK"}).json()
+    ev = client.post("/api/subjects", json={"short": "EV"}).json()
+    t1 = client.post("/api/teachers", json={"short": "T1", "target_hours": 20, "undesired": [[0, 0]]}).json()
+    t2 = client.post("/api/teachers", json={"short": "T2"}).json()
+    r1 = client.post("/api/rooms", json={"short": "R1"}).json()
+    r2 = client.post("/api/rooms", json={"short": "R2"}).json()
+    res = client.post(
+        "/api/classes",
+        json={
+            "name": "1a",
+            "divisions": [{"name": "Religion", "groups": [{"name": "RK"}, {"name": "EV"}]}],
+        },
+    )
+    assert res.status_code == 201, res.text
+    cls = res.json()
+    g_rk, g_ev = (g["id"] for g in cls["divisions"][0]["groups"])
+    # Gruppe umbenennen behält die ID
+    cls["divisions"][0]["groups"][1]["name"] = "Evangelisch"
+    upd = client.put(f"/api/classes/{cls['id']}", json=cls).json()
+    assert upd["divisions"][0]["groups"][1] == {"id": g_ev, "name": "Evangelisch"}
+
+    res = client.post(
+        "/api/lessons",
+        json={
+            "periods_per_week": 2,
+            "parts": [
+                {
+                    "subject_id": rk["id"],
+                    "group_ids": [g_rk],
+                    "teacher_ids": [t1["id"]],
+                    "room_ids": [r1["id"]],
+                },
+                {
+                    "subject_id": ev["id"],
+                    "group_ids": [g_ev],
+                    "teacher_ids": [t2["id"]],
+                    "room_ids": [r2["id"]],
+                },
+            ],
+        },
+    )
+    assert res.status_code == 201, res.text
+    lesson = res.json()
+    assert len(lesson["parts"]) == 2
+    tt = wait_for(client, client.post("/api/timetables", json={"name": "K", "time_limit": 5}).json()["id"])
+    assert tt["status"] == "done", tt["message"]
+    assert len(tt["placements"]) == 2
+    for p in tt["placements"]:
+        assert sorted(p["rooms"].values()) == sorted([r1["id"], r2["id"]])
+        assert (p["day"], p["period"]) != (0, 0)  # unerwünscht für T1
+    assert client.get(f"/api/timetables/{tt['id']}/conflicts").json() == []
+    pdf = client.get(f"/api/timetables/{tt['id']}/pdf?view=class")
+    assert pdf.status_code == 200
+
+    # Raum einer Zeile ändern
+    p = tt["placements"][0]
+    part_id = lesson["parts"][1]["id"]
+    res = client.patch(
+        f"/api/timetables/{tt['id']}/placements/{p['id']}", json={"rooms": {str(part_id): r1["id"]}}
+    )
+    assert res.status_code == 409  # R1 ist durch die RK-Zeile schon belegt
+    assert any(c["kind"] == "room" for c in res.json()["detail"]["conflicts"])
+
+    # Excel-Export und -Import behalten Teilungen und Kopplung
+    exported = client.get("/api/excel/export").content
+    res = client.post("/api/excel/import", files={"file": ("x.xlsx", exported)})
+    assert res.status_code == 200, res.text
+    assert res.json()["counts"]["Gruppen"] == 2 and res.json()["counts"]["Unterricht"] == 1
+    lessons = client.get("/api/lessons").json()
+    assert len(lessons) == 1 and len(lessons[0]["parts"]) == 2
+    teachers = {t["short"]: t for t in client.get("/api/teachers").json()}
+    assert teachers["T1"]["target_hours"] == 20 and teachers["T1"]["undesired"] == [[0, 0]]

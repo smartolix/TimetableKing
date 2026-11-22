@@ -29,7 +29,8 @@ SUBJECTS = [
     ("BE", "Kunst und Gestaltung", "#e0823d"),
     ("ME", "Musik", "#d65d8f"),
     ("BSP", "Bewegung und Sport", "#2bb5a5"),
-    ("REL", "Religion", "#8b7bd8"),
+    ("RK", "Religion röm.-kath.", "#8b7bd8"),
+    ("EV", "Religion evangelisch", "#a38fe0"),
     ("DGB", "Digitale Grundbildung", "#5b6bdc"),
     ("TEW", "Technik und Design", "#9a7b4f"),
 ]
@@ -47,7 +48,6 @@ STUNDENTAFEL: dict[str, tuple[tuple[int, int, int, int], int, str | None]] = {
     "BE": ((2, 2, 2, 1), 1, "BE"),
     "ME": ((2, 2, 1, 1), 0, "MU"),
     "BSP": ((4, 4, 3, 3), 1, "TS"),
-    "REL": ((2, 2, 2, 2), 0, None),
     "DGB": ((1, 1, 1, 1), 0, "EDV"),
     "TEW": ((2, 2, 2, 1), 1, "WR"),
 }
@@ -62,15 +62,19 @@ TEACHERS = [
     ("STE", "Steiner Paul", ["BSP", "GW"], 6, []),
     ("HOF", "Hofer Katrin", ["BSP", "BIO"], 6, []),
     ("BAU", "Bauer Michael", ["E", "GW"], 6, []),
-    ("LEI", "Leitner Sabine", ["ME", "REL"], 6, []),
+    ("LEI", "Leitner Sabine", ["ME", "RK"], 6, []),
     ("EGG", "Egger Florian", ["TEW", "BE"], 6, []),
     ("FUC", "Fuchs Martina", ["BIO", "CH", "M"], 6, []),
     ("SCH", "Schwarz Daniel", ["GSP", "E", "GW"], 6, [[4, p] for p in range(5, 8)]),
-    ("BRU", "Brunner Eva", ["REL", "D"], 6, []),
+    ("BRU", "Brunner Eva", ["RK", "D"], 6, []),
     ("WIM", "Wimmer Stefan", ["DGB", "M", "TEW"], 6, []),
     ("AIG", "Aigner Petra", ["ME", "E"], 5, []),
     ("KOG", "Kogler Lukas", ["BSP", "BE", "TEW"], 6, []),
+    ("POR", "Porsch Miriam", ["EV"], 4, [[d, p] for d in (0, 1) for p in range(8)]),
 ]
+
+# Soll-Stunden (Lehrverpflichtung); Teilzeit für HUB und POR
+TARGET_HOURS = {"HUB": 14, "POR": 8}
 
 ROOMS = [
     ("TS1", "Turnsaal 1"),
@@ -80,6 +84,8 @@ ROOMS = [
     ("BE", "Zeichensaal"),
     ("MU", "Musiksaal"),
     ("WR", "Werkraum"),
+    ("TX", "Textilraum"),
+    ("RV", "Religionsraum"),
 ]
 
 
@@ -95,46 +101,112 @@ def load_demo(session: Session) -> None:
 
     subjects = {s: models.Subject(short=s, name=n, color=c) for s, n, c in SUBJECTS}
     teachers = {
-        s: models.Teacher(short=s, name=n, max_per_day=mx, unavailable=un) for s, n, _, mx, un in TEACHERS
+        s: models.Teacher(
+            short=s, name=n, max_per_day=mx, unavailable=un, target_hours=TARGET_HOURS.get(s, 22)
+        )
+        for s, n, _, mx, un in TEACHERS
     }
     qual = {s: subj for s, _, subj, _, _ in TEACHERS}
     rooms = {s: models.Room(short=s, name=n) for s, n in ROOMS}
-    classes = {}
+    classes: dict[str, models.SchoolClass] = {}
+    groups: dict[tuple[str, str], models.Group] = {}
     for year in range(1, 5):
         for letter in "ab":
             name = f"{year}{letter}"
             home = models.Room(short=f"K{name}", name=f"Klassenzimmer {name}", capacity=26)
             rooms[home.short] = home
-            classes[name] = models.SchoolClass(name=name, home_room=home)
+            divisions = []
+            for i, (dname, gnames) in enumerate((("Religion", ("RK", "EV")), ("Gruppen", ("G1", "G2")))):
+                div = models.Division(name=dname, position=i, groups=[])
+                for j, g in enumerate(gnames):
+                    groups[(name, g)] = models.Group(name=g, position=j)
+                    div.groups.append(groups[(name, g)])
+                divisions.append(div)
+            classes[name] = models.SchoolClass(name=name, home_room=home, divisions=divisions)
     session.add_all([*subjects.values(), *teachers.values(), *rooms.values(), *classes.values()])
 
     load = dict.fromkeys(teachers, 0)
+
+    def pick(subj: str, hours: int, exclude: tuple[str, ...] = ()) -> models.Teacher:
+        """Lehrkraft mit passendem Fach und geringster Auslastung."""
+        cand = [t for t in teachers if subj in qual[t] and t not in exclude]
+        t = min(cand, key=lambda x: (load[x], x))
+        load[t] += hours
+        return teachers[t]
+
+    def part(subj, teacher_list, classes_=(), groups_=(), rooms_=()):
+        return models.LessonPart(
+            subject=subjects[subj],
+            teachers=list(teacher_list),
+            classes=list(classes_),
+            groups=list(groups_),
+            rooms=list(rooms_),
+        )
+
+    def add(hours: int, doubles: int, parts: list[models.LessonPart], note: str = "") -> None:
+        for i, p in enumerate(parts):
+            p.position = i
+        session.add(
+            models.Lesson(
+                periods_per_week=hours, double_periods=min(doubles, hours // 2), parts=parts, note=note
+            )
+        )
+
     for name, cls in classes.items():
         year = int(name[0])
         for subj, (hours_by_year, doubles, special) in STUNDENTAFEL.items():
             hours = hours_by_year[year - 1]
             if hours == 0:
                 continue
-            # Lehrkraft mit passendem Fach und geringster Auslastung
-            cand = [t for t in teachers if subj in qual[t]]
-            teacher = min(cand, key=lambda t: (load[t], t))
-            load[teacher] += hours
             if special == "TS":
                 lesson_rooms = [rooms["TS1"], rooms["TS2"]]
             elif special:
                 lesson_rooms = [rooms[special]]
             else:
                 lesson_rooms = []
-            session.add(
-                models.Lesson(
-                    subject=subjects[subj],
-                    classes=[cls],
-                    teachers=[teachers[teacher]],
-                    rooms=lesson_rooms,
-                    periods_per_week=hours,
-                    double_periods=min(doubles, hours // 2),
+            if subj == "TEW":
+                # Technik und Design in Gruppen: G1 im Werkraum, G2 im Textilraum, gleichzeitig
+                t1 = pick("TEW", hours)
+                t2 = pick("TEW", hours, exclude=(t1.short,))
+                add(
+                    hours,
+                    doubles,
+                    [
+                        part("TEW", [t1], groups_=[groups[(name, "G1")]], rooms_=[rooms["WR"]]),
+                        part("TEW", [t2], groups_=[groups[(name, "G2")]], rooms_=[rooms["TX"]]),
+                    ],
+                    "Gruppenteilung",
                 )
-            )
+            elif subj == "M" and year == 1:
+                # Teamteaching: zwei Lehrkräfte gleichzeitig in der ganzen Klasse
+                t1 = pick("M", hours)
+                t2 = pick("M", hours, exclude=(t1.short,))
+                add(hours, doubles, [part("M", [t1, t2], classes_=[cls])], "Teamteaching")
+            else:
+                add(hours, doubles, [part(subj, [pick(subj, hours)], classes_=[cls], rooms_=lesson_rooms)])
+
+    # Religion: je Jahrgang a+b gemeinsam, RK und EV gleichzeitig (Kopplung)
+    for year in range(1, 5):
+        a, b = f"{year}a", f"{year}b"
+        add(
+            2,
+            0,
+            [
+                part(
+                    "RK",
+                    [pick("RK", 2)],
+                    groups_=[groups[(a, "RK")], groups[(b, "RK")]],
+                    rooms_=[rooms[f"K{a}"]],
+                ),
+                part(
+                    "EV",
+                    [pick("EV", 2)],
+                    groups_=[groups[(a, "EV")], groups[(b, "EV")]],
+                    rooms_=[rooms["RV"]],
+                ),
+            ],
+            "Kopplung Religion",
+        )
     session.flush()
 
     sid = {k: v.id for k, v in subjects.items()}

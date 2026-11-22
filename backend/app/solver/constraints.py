@@ -40,6 +40,13 @@ def _sum(items) -> int | object:
     return sum(items) if items else 0
 
 
+def _atoms(b: Builder, class_ids: list[int] | None) -> list[int]:
+    """Schülergruppen-Atome der gewählten Klassen (leer = alle), nur solche mit Unterricht."""
+    used = set(b.classes)
+    chosen = class_ids or list(b.class_atoms)
+    return sorted({a for c in chosen for a in b.class_atoms.get(c, []) if a in used})
+
+
 def _day_count(b: Builder, kind: str, rid: int, d: int):
     return _sum(b.busy(kind, rid, d, p) for p in range(b.nP))
 
@@ -49,7 +56,9 @@ def _resource_constraints(kind: str, key: str):
     ids_param = "teacher_ids" if kind == "t" else "class_ids"
 
     def ids(b: Builder, spec: ConstraintSpec) -> list[int]:
-        return _scope(spec.params.get(ids_param), b.teachers if kind == "t" else b.classes)
+        if kind == "t":
+            return _scope(spec.params.get(ids_param), b.teachers)
+        return _atoms(b, spec.params.get(ids_param))
 
     @handler(f"{key}_max_per_day")
     def max_per_day(b: Builder, spec: ConstraintSpec) -> None:
@@ -170,23 +179,37 @@ def class_first_period(b: Builder, spec: ConstraintSpec) -> None:
 # ---- Fächer ----
 
 
-def _subject_classes(b: Builder, spec: ConstraintSpec, subjects: set[int]) -> list[int]:
-    classes = {c for lesson in b.p.lessons if lesson.subject_id in subjects for c in lesson.class_ids}
-    return [c for c in _scope(spec.params.get("class_ids"), b.classes) if c in classes]
+def _part_matches(lesson: LessonSpec, subjects: set[int], atom: int) -> bool:
+    return any(p.subject_id in subjects and atom in p.class_ids for p in lesson.parts)
 
 
-def _matcher(subjects: set[int], class_id: int) -> Callable[[LessonSpec], bool]:
-    return lambda lesson: lesson.subject_id in subjects and class_id in lesson.class_ids
+def _subject_units(b: Builder, spec: ConstraintSpec, subjects: set[int]) -> list[int]:
+    """Schülergruppen der gewählten Klassen, die eines der Fächer haben.
+
+    Gruppen mit genau denselben passenden Unterrichten werden nur einmal betrachtet.
+    """
+    seen: set[tuple[int, ...]] = set()
+    out = []
+    for atom in _atoms(b, spec.params.get("class_ids")):
+        sig = tuple(sorted(lesson.id for lesson in b.p.lessons if _part_matches(lesson, subjects, atom)))
+        if sig and sig not in seen:
+            seen.add(sig)
+            out.append(atom)
+    return out
+
+
+def _matcher(subjects: set[int], atom: int) -> Callable[[LessonSpec], bool]:
+    return lambda lesson: _part_matches(lesson, subjects, atom)
 
 
 class _SubjectView:
-    """Zeitliche Lage einer Fächergruppe in einer Klasse."""
+    """Zeitliche Lage einer Fächergruppe für eine Schülergruppe."""
 
-    def __init__(self, b: Builder, subjects: set[int], class_id: int):
+    def __init__(self, b: Builder, subjects: set[int], atom: int):
         self.b = b
         self.cover: dict[tuple[int, int], list] = {}
         self.starts: dict[int, list] = {}
-        for v, d, p, length, _card in b.card_options(_matcher(subjects, class_id)):
+        for v, d, p, length, _card in b.card_options(_matcher(subjects, atom)):
             self.starts.setdefault(d, []).append(v)
             for q in range(p, p + length):
                 self.cover.setdefault((d, q), []).append(v)
@@ -194,7 +217,7 @@ class _SubjectView:
 
     def busy(self, d: int, p: int):
         vs = self.cover.get((d, p), [])
-        return sum(vs) if vs else None  # höchstens 1 (Klasse ist nie doppelt belegt)
+        return sum(vs) if vs else None  # höchstens 1 (Schülergruppe ist nie doppelt belegt)
 
     def blocks(self, d: int):
         return _sum(self.starts.get(d, []))
@@ -208,7 +231,7 @@ class _SubjectView:
 @handler("subject_max_per_day")
 def subject_max_per_day(b: Builder, spec: ConstraintSpec) -> None:
     subjects = set(spec.params["subject_ids"])
-    for c in _subject_classes(b, spec, subjects):
+    for c in _subject_units(b, spec, subjects):
         view = _SubjectView(b, subjects, c)
         for d in range(b.nD):
             if len(view.starts.get(d, [])) > spec.params["max"]:
@@ -221,7 +244,7 @@ def subject_not_consecutive_days(b: Builder, spec: ConstraintSpec) -> None:
     pairs = [(d, d + 1) for d in range(b.nD - 1)]
     if spec.params.get("wrap") and b.nD > 2:
         pairs.append((b.nD - 1, 0))
-    for c in _subject_classes(b, spec, subjects):
+    for c in _subject_units(b, spec, subjects):
         view = _SubjectView(b, subjects, c)
         for d1, d2 in pairs:
             a, z = view.on_day(d1), view.on_day(d2)
@@ -234,7 +257,7 @@ def subject_forbidden_slots(b: Builder, spec: ConstraintSpec) -> None:
     subjects = set(spec.params["subject_ids"])
     slots = {tuple(s) for s in spec.params["slots"]}
     only_doubles = spec.params.get("only_doubles", False)
-    for c in _subject_classes(b, spec, subjects):
+    for c in _subject_units(b, spec, subjects):
         for v, d, p, length, card in b.card_options(_matcher(subjects, c)):
             if card.fixed is not None or (only_doubles and length < 2):
                 continue
@@ -246,7 +269,7 @@ def subject_forbidden_slots(b: Builder, spec: ConstraintSpec) -> None:
 def subject_max_in_slots(b: Builder, spec: ConstraintSpec) -> None:
     subjects = set(spec.params["subject_ids"])
     slots = [tuple(s) for s in spec.params["slots"]]
-    for c in _subject_classes(b, spec, subjects):
+    for c in _subject_units(b, spec, subjects):
         view = _SubjectView(b, subjects, c)
         expr = _sum(view.busy(d, p) for d, p in slots)
         if not isinstance(expr, int):
@@ -256,7 +279,7 @@ def subject_max_in_slots(b: Builder, spec: ConstraintSpec) -> None:
 @handler("subject_edge")
 def subject_edge(b: Builder, spec: ConstraintSpec) -> None:
     subjects = set(spec.params["subject_ids"])
-    for c in _subject_classes(b, spec, subjects):
+    for c in _subject_units(b, spec, subjects):
         for v, d, p, length, _card in b.card_options(_matcher(subjects, c)):
             before = b.any_of([b.busy("c", c, d, q) for q in range(0, p)])
             after = b.any_of([b.busy("c", c, d, q) for q in range(p + length, b.nP)])
@@ -268,7 +291,12 @@ def subject_edge(b: Builder, spec: ConstraintSpec) -> None:
 
 def _pair(b: Builder, spec: ConstraintSpec):
     a, z = {spec.params["subject_a"]}, {spec.params["subject_b"]}
-    classes = [c for c in _subject_classes(b, spec, a) if c in _subject_classes(b, spec, z)]
+    units_b = set(_atoms(b, spec.params.get("class_ids")))
+    classes = [
+        c
+        for c in _subject_units(b, spec, a)
+        if c in units_b and any(_part_matches(lesson, z, c) for lesson in b.p.lessons)
+    ]
     for c in classes:
         yield c, _SubjectView(b, a, c), _SubjectView(b, z, c)
 

@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from app.solver.cpsat import FixedCard, LessonSpec, Problem, solve
+from app.solver.cpsat import FixedCard, LessonSpec, PartSpec, Problem, solve
 
 
 def occupancy_ok(problem: Problem, placements) -> bool:
@@ -11,8 +11,8 @@ def occupancy_ok(problem: Problem, placements) -> bool:
         for q in range(pl.period, pl.period + pl.length):
             keys = [("t", t, pl.day, q) for t in lesson.teacher_ids]
             keys += [("c", c, pl.day, q) for c in lesson.class_ids]
-            if pl.room_id is not None:
-                keys.append(("r", pl.room_id, pl.day, q))
+            for r in pl.rooms.values():
+                keys.append(("r", r, pl.day, q))
             for key in keys:
                 if key in seen:
                     return False
@@ -71,7 +71,7 @@ def test_unavailable_and_max_per_day_respected():
 
 def test_fixed_card_stays():
     p = small_problem()
-    p.fixed = [FixedCard(1, 3, 4, 1, 10)]
+    p.fixed = [FixedCard(1, 3, 4, 1, {0: 10})]
     sol = solve(p, time_limit=10, workers=4)
     assert sol.ok
     fixed = [pl for pl in sol.placements if pl.locked]
@@ -92,3 +92,49 @@ def test_infeasible_detected():
     p.class_unavailable[1] = {(d, q) for d in range(1, 5) for q in range(6)}
     sol = solve(p, time_limit=5)
     assert not sol.ok
+
+
+def test_coupled_parts_run_in_parallel_with_own_rooms():
+    # Religion: RK (Lehrkraft 5, Raum 30) und EV (Lehrkraft 6, Raum 31) gleichzeitig für Gruppen-Atome 1 und 2
+    # Atome: Klasse 1 = {1, 2}; M für die ganze Klasse
+    lessons = [
+        LessonSpec(
+            1,
+            "REL",
+            [],
+            [],
+            [],
+            [1, 1],
+            parts=[
+                PartSpec(10, 7, [5], [1], [30]),
+                PartSpec(11, 8, [6], [2], [31, 32]),
+            ],
+        ),
+        LessonSpec(2, "M", [1, 2], [7], [], [1, 1, 1]),
+    ]
+    p = Problem(
+        n_days=5,
+        n_periods=4,
+        lessons=lessons,
+        class_atoms={1: [1, 2]},
+        room_unavailable={31: {(d, q) for d in range(5) for q in range(4)}},
+    )
+    sol = solve(p, time_limit=10, workers=4)
+    assert sol.ok, sol.messages
+    rel = [pl for pl in sol.placements if pl.lesson_id == 1]
+    assert len(rel) == 2
+    for pl in rel:
+        assert pl.rooms == {10: 30, 11: 32}  # 31 ist immer gesperrt
+    assert occupancy_ok(p, sol.placements)
+
+
+def test_groups_can_have_different_lessons_at_same_time():
+    # Klasse 1 geteilt in G1 (Atom 1) und G2 (Atom 2); je 5 Stunden Werken, nur 5 Stunden pro Woche verfügbar
+    lessons = [
+        LessonSpec(1, "WE G1", [1], [1], [], [1] * 5),
+        LessonSpec(2, "WE G2", [2], [2], [], [1] * 5),
+    ]
+    p = Problem(n_days=5, n_periods=1, lessons=lessons, class_atoms={1: [1, 2]})
+    sol = solve(p, time_limit=10, workers=4)
+    assert sol.ok, sol.messages
+    assert len(sol.placements) == 10

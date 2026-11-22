@@ -41,6 +41,7 @@ class SettingsIn(BaseModel):
     weight_class_gap: int = Field(20, ge=0, le=1000)
     weight_teacher_gap: int = Field(3, ge=0, le=1000)
     weight_late: int = Field(2, ge=0, le=1000)
+    weight_undesired: int = Field(10, ge=0, le=1000)
     late_from_period: int = Field(6, ge=0, le=20)
     periods: list[PeriodIn] = Field(default_factory=list, max_length=16)
 
@@ -51,6 +52,7 @@ class SettingsOut(ORM):
     weight_class_gap: int
     weight_teacher_gap: int
     weight_late: int
+    weight_undesired: int
     late_from_period: int
     periods: list[PeriodOut]
 
@@ -71,10 +73,12 @@ class SubjectOut(SubjectIn, ORM):
 class TeacherIn(BaseModel):
     short: str = Field(min_length=1, max_length=20)
     name: str = ""
+    target_hours: float | None = Field(None, ge=0, le=60)
     max_per_day: int | None = Field(None, ge=1, le=16)
     unavailable: list[Slot] = Field(default_factory=list)
+    undesired: list[Slot] = Field(default_factory=list)
 
-    _slots = field_validator("unavailable")(_check_slots)
+    _slots = field_validator("unavailable", "undesired")(_check_slots)
 
 
 class TeacherOut(TeacherIn, ORM):
@@ -94,37 +98,51 @@ class RoomOut(RoomIn, ORM):
     id: int
 
 
+class GroupIO(BaseModel):
+    id: int | None = None  # None = neu
+    name: str = Field(min_length=1, max_length=40)
+
+
+class DivisionIO(BaseModel):
+    id: int | None = None
+    name: str = Field(min_length=1, max_length=60)
+    groups: list[GroupIO] = Field(min_length=2, max_length=12)
+
+
 class ClassIn(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     home_room_id: int | None = None
     unavailable: list[Slot] = Field(default_factory=list)
+    undesired: list[Slot] = Field(default_factory=list)
+    divisions: list[DivisionIO] = Field(default_factory=list, max_length=6)
 
-    _slots = field_validator("unavailable")(_check_slots)
+    _slots = field_validator("unavailable", "undesired")(_check_slots)
 
 
 class ClassOut(ClassIn, ORM):
     id: int
 
 
-class LessonIn(BaseModel):
+class PartIO(BaseModel):
+    """Eine Zeile eines Unterrichts (Kopplungszeile)."""
+
+    id: int | None = None
     subject_id: int
-    class_ids: list[int] = Field(min_length=1)
     teacher_ids: list[int] = Field(default_factory=list)
+    class_ids: list[int] = Field(default_factory=list)  # ganze Klassen
+    group_ids: list[int] = Field(default_factory=list)  # einzelne Gruppen
     room_ids: list[int] = Field(default_factory=list)
+
+
+class LessonIn(BaseModel):
     periods_per_week: int = Field(1, ge=1, le=40)
     double_periods: int = Field(0, ge=0, le=20)
     note: str = ""
+    parts: list[PartIO] = Field(min_length=1, max_length=20)
 
 
-class LessonOut(ORM):
+class LessonOut(LessonIn):
     id: int
-    subject_id: int
-    class_ids: list[int]
-    teacher_ids: list[int]
-    room_ids: list[int]
-    periods_per_week: int
-    double_periods: int
-    note: str
 
 
 # ---- Pläne ----
@@ -152,7 +170,7 @@ class PlacementOut(ORM):
     day: int
     period: int
     length: int
-    room_id: int | None
+    rooms: dict[int, int]
     locked: bool
 
 
@@ -180,9 +198,8 @@ class TimetableOut(TimetableSummary):
 class PlacementUpdate(BaseModel):
     day: int | None = Field(None, ge=0)
     period: int | None = Field(None, ge=0)
-    room_id: int | None = None
-    # room_id explizit auf null setzen: clear_room=true
-    clear_room: bool = False
+    # Raum je Zeile {part_id: room_id}; null entfernt den Raum
+    rooms: dict[int, int | None] | None = None
     locked: bool | None = None
     force: bool = False
 

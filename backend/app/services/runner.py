@@ -67,7 +67,7 @@ class SolverRunner:
                         day=p.day,
                         period=p.period,
                         length=p.length,
-                        room_id=p.room_id,
+                        rooms={str(k): v for k, v in p.rooms.items()},
                         locked=p.locked,
                     )
                     for p in result.placements

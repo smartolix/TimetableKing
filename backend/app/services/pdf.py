@@ -65,25 +65,41 @@ def render_pdf(session: Session, timetable: models.Timetable, view: str, entity_
         if not entities:
             raise LookupError("Eintrag nicht gefunden")
 
-    def belongs(pl: models.Placement, eid: int) -> bool:
+    def relevant_parts(pl: models.Placement, eid: int) -> list[models.LessonPart]:
+        """Zeilen des Unterrichts, die zur gezeigten Klasse/Lehrkraft/Raum gehören."""
         lesson = lessons.get(pl.lesson_id)
         if lesson is None:
-            return False
+            return []
+        chosen = {int(k): v for k, v in (pl.rooms or {}).items()}
         if view == "class":
-            return any(c.id == eid for c in lesson.classes)
+            return [p for p in lesson.parts if any(c.id == eid for c in p.all_classes)]
         if view == "teacher":
-            return any(t.id == eid for t in lesson.teachers)
-        return pl.room_id == eid
+            return [p for p in lesson.parts if any(t.id == eid for t in p.teachers)]
+        return [p for p in lesson.parts if chosen.get(p.id) == eid]
 
-    def text(pl: models.Placement) -> str:
-        lesson = lessons[pl.lesson_id]
-        room = rooms[pl.room_id].short if pl.room_id in rooms else ""
-        teachers = ", ".join(t.short for t in lesson.teachers)
-        klass = ", ".join(c.name for c in lesson.classes)
-        second = {"class": teachers, "teacher": klass, "room": f"{klass} · {teachers}"}[view]
-        third = room if view != "room" else ""
-        lines = [f"<b>{lesson.subject.short}</b>", second, third]
-        return "<br/>".join(x for x in lines if x)
+    def who(part: models.LessonPart) -> str:
+        return ", ".join(
+            [c.name for c in part.classes] + [f"{g.division.school_class.name} {g.name}" for g in part.groups]
+        )
+
+    def group_names(part: models.LessonPart, class_id: int) -> str:
+        return ", ".join(g.name for g in part.groups if g.division.class_id == class_id)
+
+    def text(pl: models.Placement, parts: list[models.LessonPart], eid: int) -> str:
+        chosen = {int(k): v for k, v in (pl.rooms or {}).items()}
+        lines = []
+        for part in parts:
+            room = rooms[chosen[part.id]].short if chosen.get(part.id) in rooms else ""
+            teachers = ", ".join(t.short for t in part.teachers)
+            if view == "class":
+                grp = group_names(part, eid)
+                extra = [x for x in (grp, teachers, room) if x]
+            elif view == "teacher":
+                extra = [x for x in (who(part), room) if x]
+            else:
+                extra = [x for x in (who(part), teachers) if x]
+            lines.append(f"<b>{part.subject.short}</b> " + " · ".join(extra))
+        return "<br/>".join(lines)
 
     buf = io.BytesIO()
     page_w, page_h = landscape(A4)
@@ -118,17 +134,18 @@ def render_pdf(session: Session, timetable: models.Timetable, view: str, entity_
                     ("LINEBELOW", (0, p.index + 1), (-1, p.index + 1), 1.4, colors.HexColor("#8a94a3"))
                 )
         for pl in sorted(timetable.placements, key=lambda x: (x.day, x.period)):
-            if not belongs(pl, ent.id) or pl.day >= n_days or pl.period + pl.length > n_periods:
+            parts = relevant_parts(pl, ent.id)
+            if not parts or pl.day >= n_days or pl.period + pl.length > n_periods:
                 continue
             col, row = pl.day + 1, pl.period + 1
             existing = grid[row][col]
-            content = text(pl)
+            content = text(pl, parts, ent.id)
             if isinstance(existing, Paragraph):  # Konflikt: zwei Blöcke im selben Feld
                 content = existing.text + "<br/>" + content
             grid[row][col] = Paragraph(content, _cell)
             if pl.length > 1:
                 style.append(("SPAN", (col, row), (col, row + pl.length - 1)))
-            color = lessons[pl.lesson_id].subject.color or "#9aa5b1"
+            color = parts[0].subject.color or "#9aa5b1"
             style.append(("BACKGROUND", (col, row), (col, row + pl.length - 1), _tint(color)))
         table = Table(
             grid, colWidths=[first_col] + [day_w] * n_days, rowHeights=[8 * mm] + [row_h] * n_periods
